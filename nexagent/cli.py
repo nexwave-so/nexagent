@@ -27,6 +27,12 @@ def _get_config() -> Config:
     return Config()
 
 
+def _auth_headers(config: Config) -> dict[str, str]:
+    if config.api_key:
+        return {"Authorization": f"Bearer {config.api_key}"}
+    return {}
+
+
 def _run(coro):
     return asyncio.run(coro)
 
@@ -126,7 +132,7 @@ def status():
     try:
         import httpx
         config = _get_config()
-        resp = httpx.get(f"http://{config.api_bind}:{config.api_port}/status", timeout=5.0)
+        resp = httpx.get(f"http://{config.api_bind}:{config.api_port}/status", headers=_auth_headers(config), timeout=5.0)
         data = resp.json()
     except Exception as e:
         console.print(f"[red]Cannot reach agent API: {e}[/]\nIs the agent running?")
@@ -165,7 +171,7 @@ def signals():
     try:
         import httpx
         config = _get_config()
-        resp = httpx.get(f"http://{config.api_bind}:{config.api_port}/signals", timeout=5.0)
+        resp = httpx.get(f"http://{config.api_bind}:{config.api_port}/signals", headers=_auth_headers(config), timeout=5.0)
         rows = resp.json()[:20]
     except Exception as e:
         console.print(f"[red]Cannot reach agent API: {e}[/]")
@@ -202,7 +208,7 @@ def trades():
     try:
         import httpx
         config = _get_config()
-        resp = httpx.get(f"http://{config.api_bind}:{config.api_port}/trades", timeout=5.0)
+        resp = httpx.get(f"http://{config.api_bind}:{config.api_port}/trades", headers=_auth_headers(config), timeout=5.0)
         rows = resp.json()[:20]
     except Exception as e:
         console.print(f"[red]Cannot reach agent API: {e}[/]")
@@ -238,7 +244,7 @@ def positions():
     try:
         import httpx
         config = _get_config()
-        resp = httpx.get(f"http://{config.api_bind}:{config.api_port}/positions", timeout=5.0)
+        resp = httpx.get(f"http://{config.api_bind}:{config.api_port}/positions", headers=_auth_headers(config), timeout=5.0)
         rows = resp.json()
     except Exception as e:
         console.print(f"[red]Cannot reach agent API: {e}[/]")
@@ -281,7 +287,7 @@ def pause():
     """Pause trading (holds open positions)."""
     import httpx
     config = _get_config()
-    httpx.post(f"http://{config.api_bind}:{config.api_port}/pause", timeout=5.0)
+    httpx.post(f"http://{config.api_bind}:{config.api_port}/pause", headers=_auth_headers(config), timeout=5.0)
     console.print("[yellow]Agent paused.[/]")
 
 
@@ -290,7 +296,7 @@ def resume():
     """Resume trading after pause."""
     import httpx
     config = _get_config()
-    httpx.post(f"http://{config.api_bind}:{config.api_port}/resume", timeout=5.0)
+    httpx.post(f"http://{config.api_bind}:{config.api_port}/resume", headers=_auth_headers(config), timeout=5.0)
     console.print("[green]Agent resumed.[/]")
 
 
@@ -319,7 +325,7 @@ def close(symbol: str = typer.Argument(..., help="Symbol to close, e.g. BTC")):
     """Market-close a specific position."""
     import httpx
     config = _get_config()
-    resp = httpx.post(f"http://{config.api_bind}:{config.api_port}/close/{symbol.upper()}", timeout=10.0)
+    resp = httpx.post(f"http://{config.api_bind}:{config.api_port}/close/{symbol.upper()}", headers=_auth_headers(config), timeout=10.0)
     if resp.status_code == 404:
         console.print(f"[red]No open position for {symbol}[/]")
     else:
@@ -332,7 +338,7 @@ def close_all():
     confirm = typer.confirm("Close ALL open positions?", abort=True)
     import httpx
     config = _get_config()
-    resp = httpx.post(f"http://{config.api_bind}:{config.api_port}/close-all", timeout=30.0)
+    resp = httpx.post(f"http://{config.api_bind}:{config.api_port}/close-all", headers=_auth_headers(config), timeout=30.0)
     data = resp.json()
     console.print(f"[green]Closed: {', '.join(data.get('closed', []))}[/]")
 
