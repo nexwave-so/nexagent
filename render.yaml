@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: nexagent
+    runtime: python
+    buildCommand: pip install -e ".[alerts]"
+    startCommand: uvicorn nexagent.server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: API_BIND
+        value: "0.0.0.0"
+      - key: NEXWAVE_SIGNALS_URL
+        value: "https://nexwave.so/api/v1/signals"
+      - key: NEXWAVE_REGIME_URL
+        value: "https://nexwave.so/api/v1/signals/regime"
+      - key: PAPER_TRADING
+        value: "true"
+      # Set these in the Render dashboard — never commit to repo
+      # - key: NEXWAVE_API_KEY
+      # - key: HYPERLIQUID_WALLET_ADDRESS
+      # - key: HYPERLIQUID_PRIVATE_KEY
+      # - key: TELEGRAM_BOT_TOKEN
+      # - key: TELEGRAM_CHAT_ID
+    plan: starter  # $7/mo — keeps service running 24/7
