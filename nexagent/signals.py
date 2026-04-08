@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 def _auth_headers(config: Config) -> dict[str, str]:
     if config.nexwave_api_key:
         return {"X-API-Key": config.nexwave_api_key}
+    if config.use_x402:
+        # Signal x402 intent to Nexwave so it returns 402 instead of 401
+        return {"X-Payment-Method": "x402", "X-Wallet-Address": config.nexwave_x402_wallet}
     return {}
 
 
@@ -29,6 +32,19 @@ async def poll_signals(client: httpx.AsyncClient, config: Config) -> list[Nexwav
 
         if resp.status_code == 402 and config.use_x402:
             return await _x402_fetch(client, config, resp)
+
+        if resp.status_code == 401:
+            www_auth = resp.headers.get("www-authenticate", "").lower()
+            if config.use_x402 and "x402" in www_auth:
+                # Server explicitly advertises x402 — try it
+                return await _x402_fetch(client, config, resp)
+            # Plain API-key 401 — surface a clear message
+            logger.error(
+                "Nexwave requires an API key (www-authenticate: %s). "
+                "Get one at https://nexwave.so/dashboard?tab=API+Usage or set NEXWAVE_API_KEY in .env.",
+                resp.headers.get("www-authenticate", ""),
+            )
+            return []
 
         resp.raise_for_status()
         data = resp.json()

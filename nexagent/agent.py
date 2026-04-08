@@ -48,10 +48,16 @@ class Agent:
         self._running = True
         self._exchange_status = "connected"
         await self._sync_exchange_positions()
+        portfolio = await self.executor.get_portfolio_usd()
+        if not self.config.paper_trading and portfolio == 0:
+            logger.warning(
+                "Hyperliquid balance is $0 — deposit USDC to your account before live trading. "
+                "Wallet: %s", self.config.hyperliquid_wallet_address
+            )
         logger.info(
             "Startup complete — mode=%s portfolio=$%.0f",
             "PAPER" if self.config.paper_trading else "LIVE",
-            await self.executor.get_portfolio_usd(),
+            portfolio,
         )
 
     async def shutdown(self) -> None:
