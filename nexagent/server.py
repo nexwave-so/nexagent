@@ -38,8 +38,9 @@ def require_auth(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _agent
+    global _agent, _config
     config = Config()
+    _config = config
     setup_logging(config.log_level)
     _agent = Agent(config)
     await _agent.startup()

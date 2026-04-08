@@ -27,7 +27,7 @@ class Order(BaseModel):
     side: Literal["buy", "sell"]
     size_usd: float
     price: float | None = None
-    order_type: Literal["entry", "exit", "stop_loss", "take_profit", "time_stop"]
+    order_type: Literal["entry", "exit", "stop_loss", "take_profit", "time_stop", "manual"]
     exchange_order_id: str | None = None
     status: Literal["pending", "filled", "failed", "cancelled"]
     signal_id: str | None = None
@@ -66,7 +66,7 @@ class Position(BaseModel):
 
 class ExitAction(BaseModel):
     position: Position
-    reason: Literal["stop_loss", "trailing_stop", "take_profit", "time_stop", "signal", "reversal"]
+    reason: Literal["stop_loss", "trailing_stop", "take_profit", "time_stop", "signal", "reversal", "manual"]
 
 
 class AgentStatus(BaseModel):
