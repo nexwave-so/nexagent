@@ -14,7 +14,7 @@ class Config(BaseSettings):
     )
 
     # Nexwave connection
-    nexwave_signals_url: str = "https://nexwave.so/api/v1/signals"
+    nexwave_signals_url: str = "https://nexwave.so/api/signals"
     nexwave_regime_url: str = "https://nexwave.so/api/v1/signals/regime"
     nexwave_poll_interval: int = 30
     nexwave_api_key: str = ""

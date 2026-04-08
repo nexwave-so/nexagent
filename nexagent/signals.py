@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import logging
-from typing import AsyncIterator
+from datetime import datetime, timezone
+from typing import Any, AsyncIterator
 
 import httpx
 
@@ -15,10 +17,7 @@ logger = logging.getLogger(__name__)
 def _auth_headers(config: Config) -> dict[str, str]:
     if config.nexwave_api_key:
         return {"X-API-Key": config.nexwave_api_key}
-    if config.use_x402:
-        # Signal x402 intent to Nexwave so it returns 402 instead of 401
-        return {"X-Payment-Method": "x402", "X-Wallet-Address": config.nexwave_x402_wallet}
-    return {}
+    return {}  # x402: no auth header needed; server returns 402 to unauthenticated requests
 
 
 async def poll_signals(client: httpx.AsyncClient, config: Config) -> list[NexwaveSignal]:
@@ -47,21 +46,71 @@ async def poll_signals(client: httpx.AsyncClient, config: Config) -> list[Nexwav
             return []
 
         resp.raise_for_status()
-        data = resp.json()
-        raw_signals = data.get("signals", data) if isinstance(data, dict) else data
-        signals = []
-        for s in raw_signals:
-            try:
-                signals.append(NexwaveSignal(**s))
-            except Exception as e:
-                logger.warning("Failed to parse signal: %s — %s", s, e)
-        return signals
+        return _parse_signals_response(resp.json())
     except httpx.HTTPStatusError as e:
         logger.error("Nexwave API error %s: %s", e.response.status_code, e.response.text[:200])
         return []
     except Exception as e:
         logger.error("Signal poll failed: %s", e)
         return []
+
+
+def _parse_signals_response(data: Any) -> list[NexwaveSignal]:
+    """
+    Convert a Nexwave API response to NexwaveSignal objects.
+
+    Handles both the Nexwave v2 nested format:
+        { updatedAt, signals: { data: [{asset, type, venue, direction, ...}] } }
+    and the flat legacy format:
+        [ {symbol, signal_type, source, direction, ...} ]
+    """
+    if isinstance(data, dict):
+        updated_at_str = data.get("updatedAt")
+        try:
+            ts = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00")) if updated_at_str else utcnow()
+        except Exception:
+            ts = utcnow()
+
+        signals_section = data.get("signals", {})
+        if isinstance(signals_section, dict):
+            raw = signals_section.get("data", [])
+        else:
+            raw = signals_section if isinstance(signals_section, list) else []
+    elif isinstance(data, list):
+        raw = data
+        ts = utcnow()
+    else:
+        return []
+
+    results: list[NexwaveSignal] = []
+    for s in raw:
+        if not isinstance(s, dict):
+            continue
+        try:
+            # Map Nexwave API field names → NexwaveSignal field names
+            symbol = s.get("symbol") or s.get("asset", "")
+            signal_type = s.get("signal_type") or s.get("type", "unknown")
+            source = s.get("source") or s.get("venue", "nexwave")
+            confidence = float(s.get("confidence", 0.0))
+            strength = float(s.get("strength", confidence))
+            direction = s.get("direction", "long")
+            key = f"{symbol}:{signal_type}:{direction}:{ts.isoformat()}"
+            sig_id = s.get("id") or hashlib.sha1(key.encode()).hexdigest()[:16]
+            results.append(NexwaveSignal(
+                id=sig_id,
+                symbol=symbol,
+                signal_type=signal_type,
+                direction=direction,  # type: ignore[arg-type]
+                strength=strength,
+                confidence=confidence,
+                z_score=s.get("z_score"),
+                source=source,
+                exit_signal=s.get("exit_signal", False),
+                timestamp=ts,
+            ))
+        except Exception as e:
+            logger.warning("Failed to parse signal: %s — %s", s, e)
+    return results
 
 
 async def _x402_fetch(
@@ -79,13 +128,11 @@ async def _x402_fetch(
         payment_header = await sign_and_pay(payment_required_resp, config)
         resp = await client.get(
             config.nexwave_signals_url,
-            headers={**_auth_headers(config), "X-Payment": payment_header},
+            headers={**_auth_headers(config), "PAYMENT-SIGNATURE": payment_header},
             timeout=15.0,
         )
         resp.raise_for_status()
-        data = resp.json()
-        raw_signals = data.get("signals", data) if isinstance(data, dict) else data
-        return [NexwaveSignal(**s) for s in raw_signals]
+        return _parse_signals_response(resp.json())
     except Exception as e:
         logger.error("x402 payment flow failed: %s", e)
         return []

@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 # ── Solana program IDs ──────────────────────────────────────────────────────
 _SPL_TOKEN = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
 _TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"
-_ASSOCIATED_TOKEN = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJe1bRS"
+_ASSOCIATED_TOKEN = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
 _COMPUTE_BUDGET = "ComputeBudget111111111111111111111111111111"
 _MEMO = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
 
@@ -57,7 +57,7 @@ async def sign_and_pay(
     from solders.pubkey import Pubkey
     from solders.transaction import VersionedTransaction
 
-    req = _parse_payment_required(payment_required_resp)
+    full_req, req = _parse_payment_required(payment_required_resp)
     logger.debug("x402 payment requirements: %s", req)
 
     # ── Parse requirements ───────────────────────────────────────────────────
@@ -65,10 +65,11 @@ async def sign_and_pay(
     amount = int(req.get("amount", req.get("maxAmountRequired", "0")))
     asset_str = req.get("asset", _USDC_MINT)
     pay_to_str = req.get("payTo", req.get("pay_to", ""))
-    extra = req.get("extra", {})
+    extra = req.get("extra") or {}
     fee_payer_str = extra.get("feePayer", pay_to_str)
     memo_val = extra.get("memo") or secrets.token_hex(16)  # random nonce per spec
-    resource_url = req.get("resource", config.nexwave_signals_url)
+    outer_resource = full_req.get("resource") or {}
+    resource_url = outer_resource.get("url", config.nexwave_signals_url)
 
     # ── Keys ─────────────────────────────────────────────────────────────────
     keypair = _load_keypair(config.nexwave_x402_private_key)
@@ -105,22 +106,34 @@ async def sign_and_pay(
 
     # ── Assemble and partially sign ──────────────────────────────────────────
     # fee_payer is the facilitator — their slot stays empty (zeros)
+    from solders.signature import Signature
+
     msg = MessageV0.try_compile(
         payer=fee_payer,
         instructions=instructions,
         address_lookup_table_accounts=[],
         recent_blockhash=blockhash,
     )
-    tx = VersionedTransaction(msg, [keypair])
+    # Sign the wire-format message bytes (0x80 prefix + solders bytes(msg));
+    # feePayer slot stays Signature.default() (all zeros)
+    wire_msg_bytes = bytes([0x80]) + bytes(msg)
+    our_sig = keypair.sign_message(wire_msg_bytes)
+    num_signers = msg.header.num_required_signatures
+    sigs = [Signature.default()] * num_signers
+    for i in range(num_signers):
+        if msg.account_keys[i] == keypair.pubkey():
+            sigs[i] = our_sig
+            break
+    tx = VersionedTransaction.populate(msg, sigs)
     tx_b64 = base64.b64encode(bytes(tx)).decode()
 
     # ── Build PaymentPayload (x402 v2) ───────────────────────────────────────
     payload: dict[str, Any] = {
         "x402Version": 2,
         "resource": {
-            "url": resource_url if isinstance(resource_url, str) else str(resource_url),
-            "description": req.get("description", "Nexwave signal access"),
-            "mimeType": req.get("mimeType", "application/json"),
+            "url": resource_url,
+            "description": outer_resource.get("description", "Nexwave signal access"),
+            "mimeType": outer_resource.get("mimeType", "application/json"),
         },
         "accepted": req,
         "payload": {"transaction": tx_b64},
@@ -240,31 +253,48 @@ async def _fetch_token_decimals(mint_address: str) -> int:
         return resp.json()["result"]["value"]["decimals"]
 
 
-def _parse_payment_required(resp: httpx.Response) -> dict[str, Any]:
-    """Extract PaymentRequirements from a 402 response (header or body)."""
+def _parse_payment_required(
+    resp: httpx.Response,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """
+    Extract PaymentRequirements from a 402 response.
+
+    Returns (full_body, requirements) where:
+      - full_body is the entire decoded payment-required object
+      - requirements is the selected accepts[0] entry (the inner PaymentRequirements)
+    """
+    full: dict[str, Any] = {}
+
     for header in ("payment-required", "x-payment-required"):
         val = resp.headers.get(header)
         if val:
             try:
-                return json.loads(base64.b64decode(val + "=="))
+                full = json.loads(base64.b64decode(val + "=="))
+                break
             except Exception:
                 try:
-                    return json.loads(val)
+                    full = json.loads(val)
+                    break
                 except Exception:
                     pass
 
-    try:
-        body = resp.json()
-        if isinstance(body, dict):
-            if "payTo" in body or "pay_to" in body or "scheme" in body:
-                return body
-            if "paymentRequirements" in body:
-                return body["paymentRequirements"]
-            # x402 v2 wraps requirements in an array
-            if "accepts" in body and isinstance(body["accepts"], list) and body["accepts"]:
-                return body["accepts"][0]
-    except Exception:
-        pass
+    if not full:
+        try:
+            full = resp.json()
+        except Exception:
+            pass
+
+    if not isinstance(full, dict):
+        raise ValueError(f"Cannot parse x402 PaymentRequirements: expected JSON object, got {type(full)}")
+
+    # x402 v2: { accepts: [...] }
+    if "accepts" in full and isinstance(full["accepts"], list) and full["accepts"]:
+        return full, full["accepts"][0]
+    # Flat requirements object (v1 or non-standard)
+    if "payTo" in full or "pay_to" in full or "scheme" in full:
+        return full, full
+    if "paymentRequirements" in full:
+        return full, full["paymentRequirements"]
 
     raise ValueError(
         "Cannot parse x402 PaymentRequirements from 402 response. "
