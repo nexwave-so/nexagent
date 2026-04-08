@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 
 from .config import Config
 from .models import AgentStatus, NexwaveSignal, RegimeData
+from .utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,9 @@ class RiskManager:
         if signal.confidence < self.config.min_signal_confidence:
             return False, f"confidence_below_threshold ({signal.confidence:.2f})"
 
+        if self.config.max_daily_trades > 0 and state.trades_today >= self.config.max_daily_trades:
+            return False, "max_daily_trades_reached"
+
         if signal.symbol.upper() in self.config.blocked_assets_set:
             return False, "asset_blocked"
 
@@ -65,13 +68,13 @@ class RiskManager:
         return True, ""
 
     def record_trade(self, symbol: str) -> None:
-        self._cooldowns[symbol.upper()] = datetime.utcnow()
+        self._cooldowns[symbol.upper()] = utcnow()
 
     def _in_cooldown(self, symbol: str) -> bool:
         last = self._cooldowns.get(symbol.upper())
         if last is None:
             return False
-        elapsed = (datetime.utcnow() - last).total_seconds()
+        elapsed = (utcnow() - last).total_seconds()
         return elapsed < self.config.cooldown_seconds
 
     def position_size_usd(self, portfolio_usd: float) -> float:

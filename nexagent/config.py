@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import field_validator, model_validator
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -32,6 +32,7 @@ class Config(BaseSettings):
     risk_per_trade_pct: float = 1.0
     daily_loss_limit_usd: float = 200.0
     max_open_positions: int = 5
+    max_daily_trades: int = 20          # 0 = unlimited
     cooldown_seconds: int = 300
     min_signal_strength: float = 0.7
     min_signal_confidence: float = 0.6
@@ -52,10 +53,13 @@ class Config(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
-    # Agent
+    # Agent — api_port reads API_PORT or PORT (Render injects PORT)
     log_level: str = "INFO"
     db_path: str = "./nexagent.db"
-    api_port: int = 7070
+    api_port: int = Field(
+        default=7070,
+        validation_alias=AliasChoices("API_PORT", "PORT"),
+    )
     api_bind: str = "127.0.0.1"
     api_key: str = ""
 

@@ -8,8 +8,6 @@ from .models import Order, Position
 
 logger = logging.getLogger(__name__)
 
-_PAPER_BADGE = "[PAPER] " if True else ""
-
 
 class TelegramAlert:
     def __init__(self, config: Config) -> None:

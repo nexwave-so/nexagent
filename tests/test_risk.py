@@ -133,6 +133,19 @@ def test_cooldown():
     assert reason == "cooldown_active"
 
 
+def test_blocks_max_daily_trades():
+    rm = RiskManager(_config(max_daily_trades=5))
+    ok, reason = rm.check(_signal(), _status(trades_today=5))
+    assert not ok
+    assert reason == "max_daily_trades_reached"
+
+
+def test_unlimited_daily_trades():
+    rm = RiskManager(_config(max_daily_trades=0))
+    ok, _ = rm.check(_signal(), _status(trades_today=9999))
+    assert ok
+
+
 def test_regime_risk_off():
     rm = RiskManager(_config())
     rm.update_regime(RegimeData(state="risk_off", confidence=0.9))

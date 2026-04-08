@@ -86,7 +86,7 @@ async def trades_endpoint():
 @app.get("/positions", dependencies=[Depends(require_auth)])
 async def positions_endpoint():
     agent = get_agent()
-    positions = await agent._load_positions()
+    positions = await agent.load_positions()
     positions = await agent.executor.sync_positions(positions)
     return [
         {
@@ -119,10 +119,10 @@ async def resume_endpoint():
 @app.post("/close/{symbol}", dependencies=[Depends(require_auth)])
 async def close_symbol(symbol: str):
     agent = get_agent()
-    positions = await agent._load_positions()
+    positions = await agent.load_positions()
     for pos in positions:
         if pos.symbol.upper() == symbol.upper():
-            await agent._execute_exit(pos, reason="signal")
+            await agent._execute_exit(pos, reason="manual")
             return {"closed": symbol}
     raise HTTPException(status_code=404, detail=f"No open position for {symbol}")
 
@@ -130,9 +130,9 @@ async def close_symbol(symbol: str):
 @app.post("/close-all", dependencies=[Depends(require_auth)])
 async def close_all():
     agent = get_agent()
-    positions = await agent._load_positions()
+    positions = await agent.load_positions()
     closed = []
     for pos in positions:
-        await agent._execute_exit(pos, reason="signal")
+        await agent._execute_exit(pos, reason="manual")
         closed.append(pos.symbol)
     return {"closed": closed}

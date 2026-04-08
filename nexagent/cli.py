@@ -375,8 +375,48 @@ def init():
         lines.append(f"TELEGRAM_CHAT_ID={tg_chat}")
 
     env_path.write_text("\n".join(lines) + "\n")
-    console.print(f"\n[green]✓ .env written[/]")
-    console.print("Run [bold]nex start[/] to begin trading.")
+    console.print(f"\n[green]✓ .env written[/]\n")
+
+    # Connectivity checks
+    console.print("Verifying connectivity...")
+
+    # Check Nexwave signal feed
+    if api_key:
+        try:
+            import httpx as _httpx
+            resp = _httpx.get(
+                "https://nexwave.so/api/v1/signals",
+                headers={"X-API-Key": api_key},
+                timeout=10.0,
+            )
+            if resp.status_code == 200:
+                count = len(resp.json().get("signals", []))
+                console.print(f"  [green]✓ Nexwave signals reachable ({count} signals live)[/]")
+            elif resp.status_code == 401:
+                console.print("  [red]✗ Nexwave API key rejected (check your key)[/]")
+            else:
+                console.print(f"  [yellow]⚠ Nexwave returned {resp.status_code}[/]")
+        except Exception as e:
+            console.print(f"  [yellow]⚠ Could not reach Nexwave: {e}[/]")
+    else:
+        console.print("  [dim]─ Nexwave check skipped (no API key)[/]")
+
+    # Check Hyperliquid REST reachability
+    try:
+        import httpx as _httpx
+        resp = _httpx.post(
+            "https://api.hyperliquid.fi/info",
+            json={"type": "meta"},
+            timeout=8.0,
+        )
+        if resp.status_code == 200:
+            console.print("  [green]✓ Hyperliquid API reachable[/]")
+        else:
+            console.print(f"  [yellow]⚠ Hyperliquid returned {resp.status_code}[/]")
+    except Exception as e:
+        console.print(f"  [yellow]⚠ Could not reach Hyperliquid: {e}[/]")
+
+    console.print("\nRun [bold]nex start[/] to begin trading.")
 
 
 if __name__ == "__main__":

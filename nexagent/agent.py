@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime
 
 import httpx
 
@@ -35,6 +35,7 @@ class Agent:
         self._last_trade_at: datetime | None = None
         self._signals_today = 0
         self._trades_today = 0
+        self._counter_date: str = utcnow().strftime("%Y-%m-%d")
         self._nexwave_status: str = "down"
         self._exchange_status: str = "down"
         self._regime_fetched_at: datetime | None = None
@@ -46,6 +47,7 @@ class Agent:
         await self.executor.connect()
         self._running = True
         self._exchange_status = "connected"
+        await self._sync_exchange_positions()
         logger.info(
             "Startup complete — mode=%s portfolio=$%.0f",
             "PAPER" if self.config.paper_trading else "LIVE",
@@ -54,7 +56,7 @@ class Agent:
 
     async def shutdown(self) -> None:
         self._running = False
-        positions = await self._load_positions()
+        positions = await self.load_positions()
         logger.info(
             "Shutting down — open positions: %d, signals today: %d, trades today: %d",
             len(positions), self._signals_today, self._trades_today,
@@ -92,6 +94,7 @@ class Agent:
     # ── Signal processing ─────────────────────────────────────────────────────
 
     async def _poll_and_act(self, client: httpx.AsyncClient) -> None:
+        self._maybe_reset_daily_counters()
         signals = await poll_signals(client, self.config)
 
         if signals:
@@ -103,7 +106,7 @@ class Agent:
             self._nexwave_status = "connected"
 
         status = await self._build_status()
-        open_pos_symbols = {p.symbol for p in await self._load_positions()}
+        open_pos_symbols = {p.symbol for p in await self.load_positions()}
 
         for signal in signals:
             await self._process_signal(signal, status, open_pos_symbols)
@@ -130,7 +133,7 @@ class Agent:
 
         # Conflict: signal opposes existing position → close first
         if signal.symbol in open_pos_symbols:
-            positions = await self._load_positions()
+            positions = await self.load_positions()
             for pos in positions:
                 if pos.symbol == signal.symbol:
                     if pos.side != signal.direction:
@@ -175,7 +178,7 @@ class Agent:
         )
 
     async def _handle_exit_signal(self, signal: NexwaveSignal) -> None:
-        positions = await self._load_positions()
+        positions = await self.load_positions()
         for pos in positions:
             if pos.symbol == signal.symbol:
                 await self._execute_exit(pos, reason="signal")
@@ -186,7 +189,7 @@ class Agent:
     # ── Exit handling ─────────────────────────────────────────────────────────
 
     async def _check_exits(self) -> None:
-        positions = await self._load_positions()
+        positions = await self.load_positions()
         if not positions:
             return
 
@@ -246,7 +249,49 @@ class Agent:
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    async def _load_positions(self) -> list[Position]:
+    def _maybe_reset_daily_counters(self) -> None:
+        today = utcnow().strftime("%Y-%m-%d")
+        if today != self._counter_date:
+            self._counter_date = today
+            self._signals_today = 0
+            self._trades_today = 0
+
+    async def _sync_exchange_positions(self) -> None:
+        """Cold-start recovery: fetch live exchange positions and add any missing from DB."""
+        if self.config.paper_trading or self.executor.exchange is None:
+            return
+        try:
+            exchange_positions = await self.executor.exchange.fetch_positions()
+            db_symbols = {p.symbol for p in await self.load_positions()}
+            recovered = 0
+            for ep in exchange_positions:
+                contracts = ep.get("contracts") or 0
+                if float(contracts) == 0:
+                    continue
+                symbol = ep.get("info", {}).get("coin") or ep["symbol"].split("/")[0]
+                if symbol in db_symbols:
+                    continue
+                side = "long" if ep.get("side") == "long" else "short"
+                entry_price = float(ep.get("entryPrice") or ep.get("info", {}).get("entryPx") or 0)
+                notional = float(ep.get("notional") or 0)
+                size_usd = notional if notional > 0 else abs(float(contracts)) * entry_price
+                pos = Position(
+                    symbol=symbol,
+                    side=side,  # type: ignore[arg-type]
+                    size_usd=size_usd,
+                    entry_price=entry_price,
+                    high_water_mark=entry_price,
+                    opened_at=utcnow(),
+                    signal_id="recovered",
+                )
+                await self.db.save_position(pos)
+                recovered += 1
+            if recovered:
+                logger.info("Cold-start recovery: reconciled %d exchange position(s)", recovered)
+        except Exception as e:
+            logger.warning("Startup position sync failed (non-critical): %s", e)
+
+    async def load_positions(self) -> list[Position]:
         rows = await self.db.get_all_positions()
         positions = []
         for r in rows:
@@ -267,7 +312,7 @@ class Agent:
 
     async def _build_status(self) -> AgentStatus:
         pnl_data = await self.db.get_today_pnl()
-        positions = await self._load_positions()
+        positions = await self.load_positions()
         uptime = (utcnow() - self._started_at).total_seconds()
         return AgentStatus(
             running=self._running,

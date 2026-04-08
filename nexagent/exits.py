@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from .config import Config
 from .models import ExitAction, Position
+from .utils import utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ class ExitManager:
         if self.config.time_stop_hours <= 0:
             return False
         deadline = pos.opened_at + timedelta(hours=self.config.time_stop_hours)
-        return datetime.utcnow() > deadline.replace(tzinfo=None)
+        return utcnow() > deadline
 
     def update_high_water_mark(self, pos: Position) -> bool:
         """Update HWM if current price is better. Returns True if updated."""

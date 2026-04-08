@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 import ccxt.async_support as ccxt
+import httpx
 
 from .config import Config
 from .models import NexwaveSignal, Order, Position
@@ -149,7 +150,23 @@ class Executor:
         try:
             ticker = await self.exchange.fetch_ticker(symbol_ccxt)
             price = ticker["last"]
-            size_contracts = pos.size_usd / pos.entry_price
+
+            # Fetch actual position size from exchange — avoids partial/over-close
+            # if entry price moved since we opened.
+            size_contracts: float | None = None
+            try:
+                exchange_positions = await self.exchange.fetch_positions([symbol_ccxt])
+                for ep in exchange_positions:
+                    if ep.get("contracts") and ep.get("contracts") != 0:
+                        size_contracts = abs(float(ep["contracts"]))
+                        break
+            except Exception:
+                pass
+            if size_contracts is None:
+                size_contracts = pos.size_usd / pos.entry_price
+                logger.warning(
+                    "Could not fetch live position size for %s — using estimate", pos.symbol
+                )
 
             order = await self.exchange.create_market_order(
                 symbol_ccxt, side, size_contracts, params={"reduceOnly": True}
@@ -191,28 +208,30 @@ class Executor:
         return updated
 
     async def _get_mid_price(self, symbol: str) -> float | None:
-        if self.config.paper_trading and self.exchange is None:
-            # In paper mode without exchange connection, try REST
+        # Try CCXT first (works in both paper and live — paper skips load_markets
+        # but fetch_ticker still works for Hyperliquid).
+        if self.exchange is not None:
             try:
-                async with __import__("httpx").AsyncClient() as client:
-                    resp = await client.post(
-                        "https://api.hyperliquid.fi/info",
-                        json={"type": "allMids"},
-                        timeout=5.0,
-                    )
-                    mids = resp.json()
-                    if isinstance(mids, dict):
-                        val = mids.get(symbol)
-                        return float(val) if val else None
+                ticker = await self.exchange.fetch_ticker(f"{symbol}/USDC:USDC")
+                return ticker["last"]
             except Exception:
-                return None
-            return None
+                pass  # fall through to REST fallback
 
+        # Direct Hyperliquid REST fallback (no exchange object or ticker failed)
         try:
-            ticker = await self.exchange.fetch_ticker(f"{symbol}/USDC:USDC")
-            return ticker["last"]
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    "https://api.hyperliquid.fi/info",
+                    json={"type": "allMids"},
+                    timeout=5.0,
+                )
+                mids = resp.json()
+                if isinstance(mids, dict):
+                    val = mids.get(symbol)
+                    return float(val) if val else None
         except Exception:
             return None
+        return None
 
     @staticmethod
     def _calc_pnl(pos: Position, current_price: float) -> float:

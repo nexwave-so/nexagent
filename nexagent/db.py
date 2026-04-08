@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import aiosqlite
-from datetime import datetime
 
 from .models import NexwaveSignal, Order, Position
+from .utils import utcnow
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS signals (
@@ -186,7 +186,7 @@ class Database:
     # ── Daily PnL ─────────────────────────────────────────────────────────────
 
     async def add_realized_pnl(self, pnl_usd: float) -> None:
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = utcnow().strftime("%Y-%m-%d")
         await self.db.execute(
             """INSERT INTO daily_pnl(date, realized, trades) VALUES(?,?,1)
                ON CONFLICT(date) DO UPDATE SET
@@ -197,7 +197,7 @@ class Database:
         await self.db.commit()
 
     async def get_today_pnl(self) -> dict:
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = utcnow().strftime("%Y-%m-%d")
         async with self.db.execute(
             "SELECT * FROM daily_pnl WHERE date=?", (today,)
         ) as cur:
@@ -207,7 +207,7 @@ class Database:
             return {"date": today, "realized": 0.0, "unrealized": 0.0, "trades": 0}
 
     async def get_trades_today(self) -> int:
-        today = datetime.utcnow().strftime("%Y-%m-%d")
+        today = utcnow().strftime("%Y-%m-%d")
         async with self.db.execute(
             "SELECT COALESCE(trades, 0) FROM daily_pnl WHERE date=?", (today,)
         ) as cur:

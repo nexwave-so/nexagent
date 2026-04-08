@@ -5,6 +5,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from .utils import utcnow
+
 
 class NexwaveSignal(BaseModel):
     id: str
@@ -92,4 +94,4 @@ class RegimeData(BaseModel):
     avg_return: float | None = None
     funding_skew: float | None = None
     vol_dispersion: float | None = None
-    fetched_at: datetime = Field(default_factory=datetime.utcnow)
+    fetched_at: datetime = Field(default_factory=utcnow)
