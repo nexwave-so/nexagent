@@ -15,7 +15,7 @@ class Config(BaseSettings):
 
     # Nexwave connection
     nexwave_signals_url: str = "https://nexwave.so/api/signals"
-    nexwave_regime_url: str = "https://nexwave.so/api/v1/signals/regime"
+    nexwave_regime_url: str = ""  # leave blank if using x402-only (no API key)
     nexwave_poll_interval: int = 30
     nexwave_api_key: str = ""
     nexwave_x402_wallet: str = ""

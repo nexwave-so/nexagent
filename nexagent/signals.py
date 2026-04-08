@@ -140,6 +140,8 @@ async def _x402_fetch(
 
 async def fetch_regime(client: httpx.AsyncClient, config: Config) -> RegimeData | None:
     """Fetch current market regime from Nexwave."""
+    if not config.nexwave_regime_url:
+        return None
     try:
         resp = await client.get(
             config.nexwave_regime_url,
