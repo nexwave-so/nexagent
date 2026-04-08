@@ -54,7 +54,7 @@ Additional: daily loss check on every exit iteration; regime refresh every 4 hou
 
 ### Signal Pipeline
 
-`poll_signals()` → dedup via DB (`signal_seen()` in last 1hr) → `RiskManager.check()` (10+ filters) → conflict check (if reverse position exists, close it first) → `RiskManager.position_size_usd()` → `Executor.execute_signal()` → persist to SQLite → Telegram alert.
+`poll_signals()` → dedup via DB (`signal_seen()` in last 1hr, **only `acted_on=1` signals count**) → `RiskManager.check()` (10+ filters) → conflict check (if reverse position exists, close it first) → `RiskManager.position_size_usd()` → min-notional floor check → `Executor.execute_signal()` → persist to SQLite → Telegram alert.
 
 ### Exit Logic (`exits.py`)
 
@@ -63,6 +63,8 @@ In `hybrid` mode, all of these are active per position: hard stop-loss (always r
 ### Position Sizing
 
 `portfolio_value * (risk_pct / 100) * regime_multiplier`, capped at `max_position_usd`. Regime multipliers: `trending_bull=1.0`, `ranging=0.5`, `high_volatility=0.25`, `risk_off=0.0` (blocks all new entries).
+
+After sizing, `agent.py` enforces a `_MIN_NOTIONAL = $11` floor — signals are skipped with `size_below_min_notional` rather than sent to the exchange where they would be rejected. With a `ranging` multiplier of 0.5, `RISK_PER_TRADE_PCT` must be ≥ ~22% to reliably clear this floor on a $100 portfolio.
 
 ### Paper Trading
 
@@ -138,3 +140,16 @@ Flow: Nexwave returns HTTP 402 → `signals.py` calls `x402.sign_and_pay()` → 
 
 Spec: https://github.com/coinbase/x402/blob/main/specs/schemes/exact/scheme_exact_svm.md  
 Overview: https://solana.com/x402
+
+### x402 signing subtleties
+
+- **Wire format**: Sign `bytes([0x80]) + bytes(msg)`, NOT `bytes(msg)` alone. `bytes(MessageV0)` in solders uses `0x02` prefix (internal bincode); the Solana runtime verifies against the `0x80`-prefixed wire format.
+- **Partial signing**: Use `VersionedTransaction.populate(msg, sigs)` with `Signature.default()` placeholders for any signer slots not controlled locally (feePayer slot). `VersionedTransaction(msg, [keypair])` fails when feePayer ≠ authority keypair.
+- **ATA program**: The deployed mainnet Associated Token Account program is `ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL`. The address ending in `...LJe1bRS` seen in older Python docs is not deployed on mainnet.
+
+### Hyperliquid / Executor subtleties
+
+- **Symbol mapping**: Nexwave uses venue-prefixed symbols (`xyz:CL`, `vntl:WHEAT`). `Executor._to_ccxt_symbol()` maps these to CCXT market IDs (`XYZ-CL/USDC:USDC`, `VNTL-WHEAT/USDH:USDH`). Plain symbols map to `SYMBOL/USDC:USDC`.
+- **Market order price**: CCXT's Hyperliquid driver requires a `price` argument on `create_market_order()` to compute max-slippage price. Omitting it raises `"market orders require price to calculate the max slippage price"`.
+- **Minimum notional**: Hyperliquid rejects orders below $10 notional. The agent skips rather than retries these.
+- **Master wallet vs agent wallet**: `walletAddress` in CCXT config is the master wallet that holds funds; `privateKey` is the agent/signing wallet. These may differ on Hyperliquid — ensure `HYPERLIQUID_WALLET_ADDRESS` points to the funded account.

@@ -56,8 +56,26 @@ class Executor:
             logger.warning("Could not fetch balance: %s", e)
             return self._portfolio_usd
 
+    @staticmethod
+    def _to_ccxt_symbol(symbol: str) -> str:
+        """Map Nexwave venue-prefixed symbols to CCXT market IDs.
+
+        Nexwave format  →  CCXT Hyperliquid format
+        xyz:CL          →  XYZ-CL/USDC:USDC
+        vntl:WHEAT      →  VNTL-WHEAT/USDH:USDH
+        AXS             →  AXS/USDC:USDC
+        """
+        if ":" in symbol:
+            venue, asset = symbol.split(":", 1)
+            venue_upper = venue.upper()
+            asset_upper = asset.upper()
+            if venue_upper == "VNTL":
+                return f"VNTL-{asset_upper}/USDH:USDH"
+            return f"{venue_upper}-{asset_upper}/USDC:USDC"
+        return f"{symbol.upper()}/USDC:USDC"
+
     async def execute_signal(self, signal: NexwaveSignal, size_usd: float) -> Order | None:
-        symbol_ccxt = f"{signal.symbol}/USDC:USDC"
+        symbol_ccxt = self._to_ccxt_symbol(signal.symbol)
         side = "buy" if signal.direction == "long" else "sell"
         order_id = f"nex-{uuid4().hex[:12]}"
         now = datetime.now(timezone.utc)
@@ -89,7 +107,7 @@ class Executor:
                 size_contracts = size_usd / price
 
                 order = await self.exchange.create_market_order(
-                    symbol_ccxt, side, size_contracts
+                    symbol_ccxt, side, size_contracts, price
                 )
                 logger.info(
                     "Order placed: %s %s $%.2f @ %.4f (id=%s)",
@@ -122,7 +140,7 @@ class Executor:
 
     async def close_position(self, pos: Position, reason: str) -> Order | None:
         side = "sell" if pos.side == "long" else "buy"
-        symbol_ccxt = f"{pos.symbol}/USDC:USDC"
+        symbol_ccxt = self._to_ccxt_symbol(pos.symbol)
         order_id = f"nex-exit-{uuid4().hex[:10]}"
         now = datetime.now(timezone.utc)
 
@@ -169,7 +187,7 @@ class Executor:
                 )
 
             order = await self.exchange.create_market_order(
-                symbol_ccxt, side, size_contracts, params={"reduceOnly": True}
+                symbol_ccxt, side, size_contracts, price, params={"reduceOnly": True}
             )
             pnl = self._calc_pnl(pos, price)
             logger.info(
@@ -212,7 +230,7 @@ class Executor:
         # but fetch_ticker still works for Hyperliquid).
         if self.exchange is not None:
             try:
-                ticker = await self.exchange.fetch_ticker(f"{symbol}/USDC:USDC")
+                ticker = await self.exchange.fetch_ticker(self._to_ccxt_symbol(symbol))
                 return ticker["last"]
             except Exception:
                 pass  # fall through to REST fallback

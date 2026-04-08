@@ -115,10 +115,15 @@ class Database:
             return [dict(r) for r in await cur.fetchall()]
 
     async def signal_seen(self, symbol: str, signal_type: str, direction: str) -> bool:
-        """Check if a (symbol, type, direction) combo was seen in the last hour."""
+        """Check if a (symbol, type, direction) combo was acted on in the last hour.
+
+        Only signals where acted_on=1 count as duplicates — skipped signals
+        (insufficient balance, risk filter, etc.) are not treated as dedup hits.
+        """
         async with self.db.execute(
             """SELECT 1 FROM signals
                WHERE symbol=? AND signal_type=? AND direction=?
+               AND acted_on = 1
                AND created_at > datetime('now', '-1 hour')
                LIMIT 1""",
             (symbol, signal_type, direction),

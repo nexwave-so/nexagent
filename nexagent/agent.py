@@ -147,10 +147,14 @@ class Agent:
                         await self._execute_exit(pos, reason="reversal")
 
         # Size and execute
+        _MIN_NOTIONAL = 11.0  # Hyperliquid rejects orders below $10 notional
         portfolio_usd = await self.executor.get_portfolio_usd()
         size_usd = self.risk.position_size_usd(portfolio_usd)
         if size_usd <= 0:
             await self.db.save_signal(signal, acted_on=False, skip_reason="size_zero_regime")
+            return
+        if size_usd < _MIN_NOTIONAL:
+            await self.db.save_signal(signal, acted_on=False, skip_reason=f"size_below_min_notional ({size_usd:.2f})")
             return
 
         order = await self.executor.execute_signal(signal, size_usd)
