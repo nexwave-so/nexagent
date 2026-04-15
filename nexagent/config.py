@@ -31,6 +31,8 @@ class Config(BaseSettings):
     risk_per_trade_pct: float = 1.0
     daily_loss_limit_usd: float = 200.0
     max_open_positions: int = 5
+    max_long_positions: int = 0         # 0 = no per-direction cap
+    max_short_positions: int = 0        # 0 = no per-direction cap
     max_daily_trades: int = 20          # 0 = unlimited
     cooldown_seconds: int = 300
     min_signal_strength: float = 0.7
@@ -38,15 +40,18 @@ class Config(BaseSettings):
 
     # Exits
     exit_mode: Literal["signal", "trailing_stop", "time", "hybrid"] = "hybrid"
-    stop_loss_pct: float = 3.0
+    stop_loss_pct_long: float = 3.0     # hard stop for long positions
+    stop_loss_pct_short: float = 3.0    # hard stop for short positions
     trailing_stop_pct: float = 2.0
     take_profit_pct: float = 5.0
     time_stop_hours: float = 72.0
+    min_hold_minutes: float = 0.0       # skip trailing/TP exits until this many minutes have elapsed (0 = disabled)
 
     # Signal filters
     allowed_signal_types: str = "funding_rate,oi_divergence,volume_anomaly"
     allowed_assets: str = ""
     blocked_assets: str = "FARTCOIN,PENGU"
+    block_crypto: bool = False          # block plain symbols (no venue prefix = crypto perp)
 
     # Alerts
     telegram_bot_token: str = ""

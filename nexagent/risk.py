@@ -40,6 +40,15 @@ class RiskManager:
         if state.open_positions >= self.config.max_open_positions:
             return False, "max_positions_reached"
 
+        if signal.direction == "long":
+            cap = self.config.max_long_positions
+            if cap > 0 and state.open_long_positions >= cap:
+                return False, "max_long_positions_reached"
+        else:
+            cap = self.config.max_short_positions
+            if cap > 0 and state.open_short_positions >= cap:
+                return False, "max_short_positions_reached"
+
         if signal.signal_type not in self.config.allowed_signal_types_set:
             return False, f"signal_type_filtered ({signal.signal_type})"
 
@@ -59,6 +68,9 @@ class RiskManager:
         if allowed and signal.symbol.upper() not in allowed:
             return False, "asset_not_in_allowlist"
 
+        if self.config.block_crypto and ":" not in signal.symbol:
+            return False, "crypto_blocked"
+
         if self._in_cooldown(signal.symbol):
             return False, "cooldown_active"
 
@@ -77,8 +89,9 @@ class RiskManager:
         elapsed = (utcnow() - last).total_seconds()
         return elapsed < self.config.cooldown_seconds
 
-    def position_size_usd(self, portfolio_usd: float) -> float:
+    def position_size_usd(self, portfolio_usd: float, signal: NexwaveSignal) -> float:
         raw = portfolio_usd * (self.config.risk_per_trade_pct / 100)
         capped = min(raw, self.config.max_position_usd)
         multiplier = _REGIME_MULTIPLIERS.get(self._current_regime, 1.0)
-        return capped * multiplier
+        conviction = signal.strength * signal.confidence
+        return capped * multiplier * conviction

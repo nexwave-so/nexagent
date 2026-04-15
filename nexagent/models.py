@@ -74,6 +74,8 @@ class AgentStatus(BaseModel):
     paper_trading: bool
     exit_mode: str
     open_positions: int
+    open_long_positions: int = 0
+    open_short_positions: int = 0
     daily_pnl_usd: float
     daily_loss_limit_usd: float
     paused: bool

@@ -29,6 +29,8 @@ def _status(**kwargs) -> AgentStatus:
         paper_trading=True,
         exit_mode="hybrid",
         open_positions=0,
+        open_long_positions=0,
+        open_short_positions=0,
         daily_pnl_usd=0.0,
         daily_loss_limit_usd=200.0,
         paused=False,
@@ -154,15 +156,63 @@ def test_regime_risk_off():
 
 
 def test_position_size_regime_scaling():
+    sig = _signal(strength=1.0, confidence=1.0)  # conviction=1.0 to isolate regime scaling
     rm = RiskManager(_config(risk_per_trade_pct=1.0, max_position_usd=1000))
     rm.update_regime(RegimeData(state="ranging", confidence=0.8))
-    size = rm.position_size_usd(10_000)
-    assert size == 50.0  # 10000 * 1% * 0.5
+    size = rm.position_size_usd(10_000, sig)
+    assert size == 50.0  # 10000 * 1% * 0.5 * 1.0
 
     rm.update_regime(RegimeData(state="high_volatility", confidence=0.8))
-    size = rm.position_size_usd(10_000)
-    assert size == 25.0  # 10000 * 1% * 0.25
+    size = rm.position_size_usd(10_000, sig)
+    assert size == 25.0  # 10000 * 1% * 0.25 * 1.0
 
     rm.update_regime(RegimeData(state="trending_bull", confidence=0.8))
-    size = rm.position_size_usd(10_000)
-    assert size == 100.0  # 10000 * 1% * 1.0
+    size = rm.position_size_usd(10_000, sig)
+    assert size == 100.0  # 10000 * 1% * 1.0 * 1.0
+
+
+def test_position_size_conviction_scaling():
+    sig = _signal(strength=0.8, confidence=0.5)  # conviction = 0.40
+    rm = RiskManager(_config(risk_per_trade_pct=1.0, max_position_usd=1000))
+    rm.update_regime(RegimeData(state="trending_bull", confidence=0.9))
+    size = rm.position_size_usd(10_000, sig)
+    assert size == pytest.approx(40.0)  # 10000 * 1% * 1.0 * 0.40
+
+
+def test_blocks_max_long_positions():
+    rm = RiskManager(_config(max_long_positions=2))
+    ok, reason = rm.check(_signal(direction="long"), _status(open_long_positions=2))
+    assert not ok
+    assert reason == "max_long_positions_reached"
+
+
+def test_allows_short_when_long_cap_hit():
+    rm = RiskManager(_config(max_long_positions=2, max_short_positions=5))
+    ok, _ = rm.check(_signal(direction="short"), _status(open_long_positions=2, open_short_positions=1))
+    assert ok
+
+
+def test_blocks_max_short_positions():
+    rm = RiskManager(_config(max_short_positions=1))
+    ok, reason = rm.check(_signal(direction="short"), _status(open_short_positions=1))
+    assert not ok
+    assert reason == "max_short_positions_reached"
+
+
+def test_blocks_crypto():
+    rm = RiskManager(_config(block_crypto=True))
+    ok, reason = rm.check(_signal(symbol="BTC"), _status())
+    assert not ok
+    assert reason == "crypto_blocked"
+
+
+def test_allows_venue_prefixed_when_crypto_blocked():
+    rm = RiskManager(_config(block_crypto=True))
+    ok, _ = rm.check(_signal(symbol="xyz:CL"), _status())
+    assert ok
+
+
+def test_crypto_block_disabled_by_default():
+    rm = RiskManager(_config())
+    ok, _ = rm.check(_signal(symbol="BTC"), _status())
+    assert ok

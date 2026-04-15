@@ -27,13 +27,17 @@ class ExitManager:
         if current is None:
             return None
 
-        # Hard stop-loss — always active regardless of exit mode
+        # Hard stop-loss — always active regardless of exit mode or hold time
         if self._stop_loss_hit(pos, current):
             logger.info(
                 "Stop-loss triggered for %s @ %.4f (entry=%.4f)",
                 pos.symbol, current, pos.entry_price,
             )
             return ExitAction(position=pos, reason="stop_loss")
+
+        # Skip soft exits (trailing stop, TP, time) until min hold has elapsed
+        if self._in_min_hold(pos):
+            return None
 
         match self.config.exit_mode:
             case "signal":
@@ -57,10 +61,21 @@ class ExitManager:
 
         return None
 
-    def _stop_loss_hit(self, pos: Position, current: float) -> bool:
-        if self.config.stop_loss_pct <= 0:
+    def _in_min_hold(self, pos: Position) -> bool:
+        if self.config.min_hold_minutes <= 0:
             return False
-        sl = pos.stop_loss_price(self.config.stop_loss_pct)
+        elapsed = (utcnow() - pos.opened_at).total_seconds()
+        return elapsed < self.config.min_hold_minutes * 60
+
+    def _stop_loss_hit(self, pos: Position, current: float) -> bool:
+        sl_pct = (
+            self.config.stop_loss_pct_long
+            if pos.side == "long"
+            else self.config.stop_loss_pct_short
+        )
+        if sl_pct <= 0:
+            return False
+        sl = pos.stop_loss_price(sl_pct)
         if pos.side == "long":
             return current <= sl
         return current >= sl

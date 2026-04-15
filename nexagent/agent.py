@@ -149,7 +149,7 @@ class Agent:
         # Size and execute
         _MIN_NOTIONAL = 11.0  # Hyperliquid rejects orders below $10 notional
         portfolio_usd = await self.executor.get_portfolio_usd()
-        size_usd = self.risk.position_size_usd(portfolio_usd)
+        size_usd = self.risk.position_size_usd(portfolio_usd, signal)
         if size_usd <= 0:
             await self.db.save_signal(signal, acted_on=False, skip_reason="size_zero_regime")
             return
@@ -324,11 +324,15 @@ class Agent:
         pnl_data = await self.db.get_today_pnl()
         positions = await self.load_positions()
         uptime = (utcnow() - self._started_at).total_seconds()
+        open_longs = sum(1 for p in positions if p.side == "long")
+        open_shorts = sum(1 for p in positions if p.side == "short")
         return AgentStatus(
             running=self._running,
             paper_trading=self.config.paper_trading,
             exit_mode=self.config.exit_mode,
             open_positions=len(positions),
+            open_long_positions=open_longs,
+            open_short_positions=open_shorts,
             daily_pnl_usd=pnl_data.get("realized", 0.0),
             daily_loss_limit_usd=self.config.daily_loss_limit_usd,
             paused=self._paused,
