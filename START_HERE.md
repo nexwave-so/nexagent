@@ -10,15 +10,16 @@ This guide walks through everything needed to run Nexagent in production — fro
 2. [Step 1 — Get Nexwave Access](#step-1--get-nexwave-access)
 3. [Step 2 — Set Up Hyperliquid](#step-2--set-up-hyperliquid)
 4. [Step 3 — Install and Configure](#step-3--install-and-configure)
-5. [Step 4 — Run in Paper Mode](#step-4--run-in-paper-mode)
-6. [Step 5 — Go Live](#step-5--go-live)
-7. [Deployment Options](#deployment-options)
-8. [Risk Management Reference](#risk-management-reference)
-9. [Exit Modes](#exit-modes)
-10. [CLI Reference](#cli-reference)
-11. [Monitoring and Alerts](#monitoring-and-alerts)
-12. [x402 Pay-Per-Signal Mode](#x402-pay-per-signal-mode)
-13. [Troubleshooting](#troubleshooting)
+5. [Working with Claude Code](#working-with-claude-code)
+6. [Step 4 — Run in Paper Mode](#step-4--run-in-paper-mode)
+7. [Step 5 — Go Live](#step-5--go-live)
+8. [Deployment Options](#deployment-options)
+9. [Risk Management Reference](#risk-management-reference)
+10. [Exit Modes](#exit-modes)
+11. [CLI Reference](#cli-reference)
+12. [Monitoring and Alerts](#monitoring-and-alerts)
+13. [x402 Pay-Per-Signal Mode](#x402-pay-per-signal-mode)
+14. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -125,6 +126,117 @@ PAPER_TRADING=true
 ```
 
 Review the full `.env.example` — every variable has a comment. The defaults are conservative and safe to start with.
+
+---
+
+## Working with Claude Code
+
+[Claude Code](https://claude.ai/code) is a CLI tool that understands the entire Nexagent codebase and can help you tune parameters, debug issues, and extend the agent — all from a conversation in your terminal. The project ships with a `CLAUDE.md` file that gives Claude instant context on the architecture, so you don't need to explain the codebase from scratch each session.
+
+### Install
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+Then open a session in the project directory:
+
+```bash
+cd nexagent
+claude
+```
+
+### Orientation prompts
+
+Use these when you first open a session to get your bearings:
+
+```
+What does the signal pipeline look like from poll to executed order?
+```
+```
+Walk me through how a position gets closed — from exit_loop to the order being saved.
+```
+```
+What risk filters does a signal pass through before a trade is placed?
+```
+
+### Tuning risk and exit parameters
+
+Claude can read your current `.env`, explain the effect of each parameter, and suggest values based on your portfolio size:
+
+```
+My portfolio is $300. I want to risk 2% per trade with a minimum hold
+of 15 minutes and tighter stops on longs than shorts. What .env values
+should I set?
+```
+```
+I keep getting size_below_min_notional skip reasons. What's the minimum
+RISK_PER_TRADE_PCT I need for a $150 portfolio in ranging regime?
+```
+```
+Explain what happens when BLOCK_CRYPTO=true — which of my current
+open positions would that have blocked?
+```
+
+### Analysing trade history
+
+Export your trade history from the agent (`nex trades`) and paste it into the session:
+
+```
+Here's a CSV of my last 80 trades. What patterns do you see in the
+losing trades? Are there any signal types or assets I should filter out?
+```
+```
+My win rate on longs is 38% but shorts are 70%. Suggest concrete
+config changes and explain the reasoning for each.
+```
+
+### Making code changes
+
+Claude Code can read, edit, and test code directly. Be specific about what you want changed:
+
+```
+Add a new skip reason that filters out signals where z_score is below
+a configurable MIN_Z_SCORE threshold. Add it to RiskManager.check()
+and wire up the config variable.
+```
+```
+The exit loop runs every 10 seconds. Make the interval configurable
+via EXIT_CHECK_INTERVAL_SECONDS in config.py.
+```
+
+After any code change, always run the tests to catch regressions:
+
+```
+Run the test suite and fix any failures.
+```
+
+Or trigger it yourself:
+
+```bash
+uv run pytest
+```
+
+### Debugging a live session
+
+Paste log output or `nex status` / `nex signals` output directly into the session:
+
+```
+Here's my nex signals output — all signals are being skipped with
+"size_below_min_notional" even though I increased RISK_PER_TRADE_PCT.
+What's going on?
+```
+```
+The agent opened a BLUR long and closed it 2 minutes later at a loss.
+Walk me through exactly which code path triggered that exit.
+```
+
+### Useful tips
+
+- **`CLAUDE.md` is the source of truth** for architecture context. If it ever contradicts the code, trust the code and ask Claude to update the doc.
+- **Start with questions before changes.** Ask Claude to explain a module before asking it to modify it — you'll catch unintended side-effects earlier.
+- **Be explicit about scope.** "Add a filter" is vague; "add a filter in `RiskManager.check()` that blocks signals where `z_score < MIN_Z_SCORE`" gets you a surgical change.
+- **Paper mode is your sandbox.** Make changes, restart the agent in paper mode, and observe behavior for a few hours before going live.
 
 ---
 
@@ -239,7 +351,10 @@ All risk parameters are in `.env`. Defaults are conservative.
 | `RISK_PER_TRADE_PCT` | `1.0` | % of portfolio risked per signal; drives position size |
 | `DAILY_LOSS_LIMIT_USD` | `200` | Agent pauses new entries when this is breached; does not close existing positions |
 | `MAX_OPEN_POSITIONS` | `5` | Concurrent position cap |
+| `MAX_LONG_POSITIONS` | `0` | Long-only cap; `0` = no per-direction limit |
+| `MAX_SHORT_POSITIONS` | `0` | Short-only cap; `0` = no per-direction limit |
 | `MAX_DAILY_TRADES` | `20` | Trade count cap per day; `0` = unlimited |
+| `BLOCK_CRYPTO` | `false` | Block plain-symbol signals (crypto perps have no venue prefix) |
 | `COOLDOWN_SECONDS` | `300` | Minimum time between trades on the same asset |
 | `MIN_SIGNAL_STRENGTH` | `0.7` | Nexwave score threshold (0–1); higher = fewer, higher-quality signals |
 | `MIN_SIGNAL_CONFIDENCE` | `0.6` | Nexwave confidence threshold (0–1) |
@@ -247,9 +362,12 @@ All risk parameters are in `.env`. Defaults are conservative.
 ### Position sizing formula
 
 ```
-size_usd = portfolio_value * (RISK_PER_TRADE_PCT / 100) * regime_multiplier
-size_usd = min(size_usd, MAX_POSITION_USD)
+conviction  = signal.strength * signal.confidence        # 0.0–1.0
+size_usd    = portfolio_value * (RISK_PER_TRADE_PCT / 100) * regime_multiplier * conviction
+size_usd    = min(size_usd, MAX_POSITION_USD)
 ```
+
+Because conviction is always ≤ 1.0, effective position sizes will be smaller than the raw formula suggests. A signal at strength=0.8 / confidence=0.75 applies a 0.60 conviction multiplier. Set `RISK_PER_TRADE_PCT` roughly 1.5–2× higher than you would without conviction scaling to maintain similar average notional.
 
 Regime multipliers applied by Nexwave:
 - `trending_bull` → 1.0x (full size)
@@ -275,10 +393,11 @@ Set with `EXIT_MODE` in `.env`.
 | `hybrid` | All rules active simultaneously — whichever triggers first wins |
 
 `hybrid` is recommended for most operators. It combines:
-- **Hard stop-loss** (`STOP_LOSS_PCT`) — runs first, always
+- **Hard stop-loss** (`STOP_LOSS_PCT_LONG` / `STOP_LOSS_PCT_SHORT`) — runs first, always; set independently per side
 - **Trailing stop** (`TRAILING_STOP_PCT`) — locks in gains
 - **Take-profit** (`TAKE_PROFIT_PCT`) — exits at target; `0` disables
 - **Time stop** (`TIME_STOP_HOURS`) — prevents indefinite holds; `0` disables
+- **Minimum hold** (`MIN_HOLD_MINUTES`) — suppresses trailing/TP exits until position has aged; hard stop still fires
 
 ---
 
