@@ -5,6 +5,8 @@
 
 Nexagent polls [Nexwave](https://nexwave.so) for ML-powered trading signals and executes trades on Hyperliquid with configurable risk rules — no database server, no broker infra, no boilerplate.
 
+**New operator? Start here: [START_HERE.md](START_HERE.md)**
+
 ---
 
 ## What This Does
@@ -89,13 +91,39 @@ nex close-all       Market-close all positions (emergency)
 
 ## How It Works
 
-```
-Nexwave (signal oracle)
-    ↓  HTTP poll every 30s
-Nexagent (this repo)
-    ↓  Risk check → position sizing → regime scaling
-Hyperliquid (execution)
-    ↑  Exit monitor every 10s (stop-loss, trailing, TP, time)
+```mermaid
+flowchart TD
+    NX["☁️ Nexwave\nML Signal Oracle"]
+
+    NX -->|"poll every 30s · API key or x402 USDC"| DEDUP
+
+    subgraph AGENT["🤖 Nexagent — Signal Loop"]
+        DEDUP["Dedup\n1-hour window"] --> RISK["Risk Manager\nstrength · confidence · daily loss limit\nmax positions · cooldown · asset filters"]
+        RISK --> SIZE["Position Sizing\nportfolio × risk_pct% × regime_multiplier"]
+        SIZE --> FLOOR["Min Notional Check\n$11 floor"]
+    end
+
+    FLOOR -- pass --> EXEC
+    FLOOR -. "skip + reason logged" .-> DB
+
+    subgraph HL["⚡ Hyperliquid"]
+        EXEC["Market Order\npaper or live"]
+    end
+
+    EXEC --> DB[("💾 SQLite\nsignals · orders\npositions · daily_pnl")]
+    EXEC --> TG["📱 Telegram\ntrade alert"]
+
+    DB --> EXIT
+
+    subgraph EXIT["🔄 Nexagent — Exit Loop · every 10s"]
+        SYNC["Sync Live Prices"] --> EM["Exit Manager"]
+        EM --> SL["Hard Stop-Loss"]
+        EM --> TS["Trailing Stop"]
+        EM --> TP["Take-Profit"]
+        EM --> TM["Time Stop"]
+    end
+
+    SL & TS & TP & TM -- close order --> EXEC
 ```
 
 Signal types:
@@ -135,6 +163,16 @@ Set `API_KEY` env var to require `Authorization: Bearer <key>` on all endpoints 
 - Sends Telegram alerts with `[PAPER]` badge
 
 Run paper mode for at least 48 hours before switching to live.
+
+---
+
+## Fully Transparent — Watch the Live Strategy On-Chain
+
+Nexagent is open source and its trading account is public. You can verify exactly how the strategy performs before running it yourself:
+
+**[View live trade history on Hyperliquid](https://app.hyperliquid.xyz/tradeHistory/0xf097D34D6609C6CBA55132649B99655f801A3373)**
+
+Every entry, exit, PnL, and liquidation is permanently on-chain. The code is open, the signals are auditable, and the track record is public. No black box, no cherry-picked backtests.
 
 ---
 
