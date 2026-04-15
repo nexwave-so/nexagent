@@ -7,6 +7,8 @@ Nexagent polls [Nexwave](https://nexwave.so) for ML-powered trading signals and 
 
 **New operator? Start here: [START_HERE.md](START_HERE.md)**
 
+> **This is experimental software. Read [DISCLAIMER.md](DISCLAIMER.md) before deploying with real capital.**
+
 ---
 
 ## What This Does
