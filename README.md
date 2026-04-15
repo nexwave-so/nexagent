@@ -53,7 +53,8 @@ Copy `.env.example` to `.env` and fill in your keys:
 
 | Variable | Default | Description |
 |---|---|---|
-| `NEXWAVE_API_KEY` | — | Your Nexwave API key — get one at [nexwave.so/dashboard](https://nexwave.so/dashboard) |
+| `NEXWAVE_X402_WALLET` | — | Your Solana wallet address — funds signal payments |
+| `NEXWAVE_X402_PRIVATE_KEY` | — | Solana signing key (Phantom: Settings → Export Private Key) |
 | `HYPERLIQUID_WALLET_ADDRESS` | — | Your HL wallet address (0x...) |
 | `HYPERLIQUID_PRIVATE_KEY` | — | Your HL private key (0x...) |
 | `PAPER_TRADING` | `true` | Start in paper mode. Set `false` for live trading |
@@ -176,9 +177,15 @@ Every entry, exit, PnL, and liquidation is permanently on-chain. The code is ope
 
 ---
 
-## Get a Nexwave API Key
+## Get Access to Nexwave Signals
 
-→ [nexwave.so/dashboard](https://nexwave.so/dashboard)
+Nexagent uses **x402 pay-per-signal** — you pay micro-amounts of USDC on Solana for each signal fetch. No subscription, no API key, no monthly commitment.
+
+1. Create a Solana wallet (e.g. [Phantom](https://phantom.app))
+2. Fund it with USDC on Solana mainnet — $20–50 is a comfortable starting amount
+3. Set `NEXWAVE_X402_WALLET` and `NEXWAVE_X402_PRIVATE_KEY` in `.env`
+
+See [START_HERE.md](START_HERE.md) for full setup instructions.
 
 Nexagent consumes two Nexwave endpoints:
 - `GET /api/v1/signals` — live signals with strength/confidence scores

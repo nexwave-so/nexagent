@@ -24,7 +24,6 @@ def _pos(**kwargs) -> Position:
 
 def _config(**kwargs) -> Config:
     defaults = dict(
-        nexwave_api_key="nxw_test",
         paper_trading=True,
         exit_mode="hybrid",
         stop_loss_pct=3.0,

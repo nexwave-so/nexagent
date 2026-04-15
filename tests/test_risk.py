@@ -44,7 +44,6 @@ def _status(**kwargs) -> AgentStatus:
 
 def _config(**kwargs) -> Config:
     defaults = dict(
-        nexwave_api_key="nxw_test",
         hyperliquid_wallet_address="0xabc",
         hyperliquid_private_key="0xdef",
         paper_trading=True,

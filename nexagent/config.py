@@ -15,9 +15,8 @@ class Config(BaseSettings):
 
     # Nexwave connection
     nexwave_signals_url: str = "https://nexwave.so/api/signals"
-    nexwave_regime_url: str = ""  # leave blank if using x402-only (no API key)
+    nexwave_regime_url: str = ""
     nexwave_poll_interval: int = 30
-    nexwave_api_key: str = ""
     nexwave_x402_wallet: str = ""
     nexwave_x402_private_key: str = ""
 
@@ -75,16 +74,10 @@ class Config(BaseSettings):
     def blocked_assets_set(self) -> set[str]:
         return {a.strip().upper() for a in self.blocked_assets.split(",") if a.strip()}
 
-    @property
-    def use_x402(self) -> bool:
-        return bool(self.nexwave_x402_wallet and self.nexwave_x402_private_key)
-
     def __repr__(self) -> str:
-        masked_key = f"{self.nexwave_api_key[:6]}..." if self.nexwave_api_key else "(not set)"
         masked_pk = "***" if self.hyperliquid_private_key else "(not set)"
         masked_x402 = "***" if self.nexwave_x402_private_key else "(not set)"
         return (
             f"Config(paper_trading={self.paper_trading}, exchange={self.exchange}, "
-            f"exit_mode={self.exit_mode}, nexwave_api_key={masked_key}, "
-            f"hl_private_key={masked_pk}, x402_key={masked_x402})"
+            f"exit_mode={self.exit_mode}, hl_private_key={masked_pk}, x402_key={masked_x402})"
         )

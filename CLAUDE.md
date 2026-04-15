@@ -101,9 +101,6 @@ Copy `.env.example` to `.env`. Required variables:
 ```
 HYPERLIQUID_WALLET_ADDRESS=0x...
 HYPERLIQUID_PRIVATE_KEY=0x...
-NEXWAVE_API_KEY=nxw_...          # OR x402 Solana pay-per-signal mode (below)
-
-# x402 pay-per-signal (alternative to API key):
 NEXWAVE_X402_WALLET=<base58 Solana pubkey, 44 chars>
 NEXWAVE_X402_PRIVATE_KEY=<base58 keypair, 88 chars — Phantom "Export Private Key">
 # Also accepted: JSON array of 64 ints (Solana CLI keygen format)
@@ -134,7 +131,7 @@ BLOCKED_ASSETS=FARTCOIN,PENGU
 
 ## x402 Pay-per-Signal
 
-When `NEXWAVE_X402_WALLET` + `NEXWAVE_X402_PRIVATE_KEY` are set (and `NEXWAVE_API_KEY` is absent), Nexwave is accessed via x402 micro-payments instead of a subscription key.
+Nexwave is accessed exclusively via x402 micro-payments. `NEXWAVE_X402_WALLET` + `NEXWAVE_X402_PRIVATE_KEY` are required.
 
 Flow: Nexwave returns HTTP 402 → `signals.py` calls `x402.sign_and_pay()` → builds a partially-signed Solana tx (SPL USDC TransferChecked + Memo + Compute Budget) with the facilitator as feePayer → tx is base64-encoded inside a `PaymentPayload` JSON → sent as `X-Payment` header → facilitator co-signs and broadcasts.
 

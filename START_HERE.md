@@ -36,17 +36,18 @@ This guide walks through everything needed to run Nexagent in production — fro
 
 ## Step 1 — Get Nexwave Access
 
-Nexwave is the signal oracle. Nexagent polls it every 30 seconds for live trading signals.
+Nexwave is the signal oracle. Nexagent polls it every 30 seconds for live trading signals using **x402 pay-per-signal** — you pay micro-amounts of USDC on Solana per fetch. No subscription, no monthly commitment.
 
-### Option A: API Key (simplest)
+1. Create a Solana wallet ([Phantom](https://phantom.app) is easiest)
+2. Fund it with USDC on Solana mainnet — $20–50 is a comfortable starting amount
+3. Export your private key: Phantom → Settings → Security & Privacy → Export Private Key
+4. Set in `.env`:
+   ```
+   NEXWAVE_X402_WALLET=<your Solana wallet address>
+   NEXWAVE_X402_PRIVATE_KEY=<exported private key>
+   ```
 
-1. Sign up at [nexwave.so/dashboard](https://nexwave.so/dashboard)
-2. Create an API key — it starts with `nxw_`
-3. Set `NEXWAVE_API_KEY=nxw_...` in your `.env`
-
-### Option B: x402 Pay-Per-Signal (no subscription)
-
-Instead of a monthly API key, you pay micro-amounts of USDC on Solana per signal fetch. See [x402 Pay-Per-Signal Mode](#x402-pay-per-signal-mode) for full setup.
+See [x402 Pay-Per-Signal Mode](#x402-pay-per-signal-mode) for details on how payments work and how to monitor your balance.
 
 ---
 

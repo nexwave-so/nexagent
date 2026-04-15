@@ -14,36 +14,16 @@ from .utils import utcnow
 logger = logging.getLogger(__name__)
 
 
-def _auth_headers(config: Config) -> dict[str, str]:
-    if config.nexwave_api_key:
-        return {"X-API-Key": config.nexwave_api_key}
-    return {}  # x402: no auth header needed; server returns 402 to unauthenticated requests
-
-
 async def poll_signals(client: httpx.AsyncClient, config: Config) -> list[NexwaveSignal]:
     """Fetch current signals from Nexwave REST endpoint."""
     try:
         resp = await client.get(
             config.nexwave_signals_url,
-            headers=_auth_headers(config),
             timeout=15.0,
         )
 
-        if resp.status_code == 402 and config.use_x402:
+        if resp.status_code == 402:
             return await _x402_fetch(client, config, resp)
-
-        if resp.status_code == 401:
-            www_auth = resp.headers.get("www-authenticate", "").lower()
-            if config.use_x402 and "x402" in www_auth:
-                # Server explicitly advertises x402 — try it
-                return await _x402_fetch(client, config, resp)
-            # Plain API-key 401 — surface a clear message
-            logger.error(
-                "Nexwave requires an API key (www-authenticate: %s). "
-                "Get one at https://nexwave.so/dashboard?tab=API+Usage or set NEXWAVE_API_KEY in .env.",
-                resp.headers.get("www-authenticate", ""),
-            )
-            return []
 
         resp.raise_for_status()
         return _parse_signals_response(resp.json())
@@ -128,7 +108,7 @@ async def _x402_fetch(
         payment_header = await sign_and_pay(payment_required_resp, config)
         resp = await client.get(
             config.nexwave_signals_url,
-            headers={**_auth_headers(config), "PAYMENT-SIGNATURE": payment_header},
+            headers={"PAYMENT-SIGNATURE": payment_header},
             timeout=15.0,
         )
         resp.raise_for_status()
@@ -145,7 +125,6 @@ async def fetch_regime(client: httpx.AsyncClient, config: Config) -> RegimeData 
     try:
         resp = await client.get(
             config.nexwave_regime_url,
-            headers=_auth_headers(config),
             timeout=15.0,
         )
         resp.raise_for_status()
@@ -168,7 +147,7 @@ async def stream_signals(
 ) -> AsyncIterator[NexwaveSignal]:
     """SSE signal stream (v0.2+). URL must end in /stream."""
     sse_url = config.nexwave_signals_url.rstrip("/") + "/stream"
-    async with client.stream("GET", sse_url, headers=_auth_headers(config)) as resp:
+    async with client.stream("GET", sse_url) as resp:
         async for line in resp.aiter_lines():
             if not line.startswith("data:"):
                 continue

@@ -11,7 +11,6 @@ from nexagent.signals import poll_signals
 
 def _config(**kwargs) -> Config:
     defaults = dict(
-        nexwave_api_key="nxw_test",
         nexwave_signals_url="https://nexwave.so/api/v1/signals",
         paper_trading=True,
     )
@@ -82,7 +81,8 @@ async def test_poll_skips_malformed_signals():
 
 
 @pytest.mark.asyncio
-async def test_auth_header_set():
+async def test_poll_no_auth_headers_on_initial_request():
+    """Initial request should carry no auth headers — x402 is triggered by the 402 response."""
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {"signals": []}
@@ -91,6 +91,6 @@ async def test_auth_header_set():
     mock_client = AsyncMock()
     mock_client.get = AsyncMock(return_value=mock_resp)
 
-    await poll_signals(mock_client, _config(nexwave_api_key="nxw_mykey"))
+    await poll_signals(mock_client, _config())
     call_kwargs = mock_client.get.call_args
-    assert call_kwargs[1]["headers"]["X-API-Key"] == "nxw_mykey"
+    assert "headers" not in (call_kwargs[1] if call_kwargs[1] else {})
