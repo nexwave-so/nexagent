@@ -53,10 +53,28 @@ CREATE TABLE IF NOT EXISTS daily_pnl (
     trades      INTEGER DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS trade_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol      TEXT NOT NULL,
+    asset_class TEXT NOT NULL,
+    direction   TEXT NOT NULL,
+    signal_type TEXT,
+    entry_price REAL,
+    exit_price  REAL,
+    size_usd    REAL,
+    pnl_usd     REAL,
+    hold_minutes REAL,
+    exit_reason TEXT,
+    opened_at   TEXT,
+    closed_at   TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_signals_symbol ON signals(symbol);
 CREATE INDEX IF NOT EXISTS idx_signals_created ON signals(created_at);
 CREATE INDEX IF NOT EXISTS idx_orders_symbol ON orders(symbol);
 CREATE INDEX IF NOT EXISTS idx_orders_type ON orders(order_type);
+CREATE INDEX IF NOT EXISTS idx_trade_log_asset ON trade_log(asset_class);
+CREATE INDEX IF NOT EXISTS idx_trade_log_closed ON trade_log(closed_at);
 """
 
 
@@ -218,3 +236,59 @@ class Database:
         ) as cur:
             row = await cur.fetchone()
             return row[0] if row else 0
+
+    # ── Trade log ─────────────────────────────────────────────────────────────
+
+    async def log_trade(
+        self,
+        symbol: str,
+        asset_class: str,
+        direction: str,
+        signal_type: str | None,
+        entry_price: float,
+        exit_price: float | None,
+        size_usd: float,
+        pnl_usd: float,
+        hold_minutes: float,
+        exit_reason: str,
+        opened_at: str,
+        closed_at: str,
+    ) -> None:
+        await self.db.execute(
+            """INSERT INTO trade_log
+               (symbol, asset_class, direction, signal_type, entry_price, exit_price,
+                size_usd, pnl_usd, hold_minutes, exit_reason, opened_at, closed_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (symbol, asset_class, direction, signal_type, entry_price, exit_price,
+             size_usd, pnl_usd, hold_minutes, exit_reason, opened_at, closed_at),
+        )
+        await self.db.commit()
+
+    async def get_signal_type(self, signal_id: str) -> str | None:
+        async with self.db.execute(
+            "SELECT signal_type FROM signals WHERE id=?", (signal_id,)
+        ) as cur:
+            row = await cur.fetchone()
+            return row[0] if row else None
+
+    async def get_performance(self) -> list[dict]:
+        async with self.db.execute(
+            """SELECT
+                asset_class,
+                direction,
+                COUNT(*) AS trades,
+                SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) AS wins,
+                ROUND(SUM(pnl_usd), 4) AS total_pnl,
+                ROUND(AVG(hold_minutes), 1) AS avg_hold_minutes,
+                ROUND(
+                    CASE
+                        WHEN SUM(CASE WHEN pnl_usd <= 0 THEN ABS(pnl_usd) ELSE 0 END) = 0 THEN NULL
+                        ELSE SUM(CASE WHEN pnl_usd > 0 THEN pnl_usd ELSE 0 END) /
+                             SUM(CASE WHEN pnl_usd <= 0 THEN ABS(pnl_usd) ELSE 0 END)
+                    END, 2
+                ) AS profit_factor
+               FROM trade_log
+               GROUP BY asset_class, direction
+               ORDER BY asset_class, direction"""
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]

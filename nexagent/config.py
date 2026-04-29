@@ -5,6 +5,11 @@ from typing import Literal
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+_COMMODITY_ASSETS: frozenset[str] = frozenset({
+    "BRENTOIL", "WTIOIL", "NATGAS", "GOLD", "SILVER",
+    "COPPER", "WHEAT", "CORN", "SOYBEAN",
+})
+
 
 class Config(BaseSettings):
     model_config = SettingsConfigDict(
@@ -47,11 +52,31 @@ class Config(BaseSettings):
     time_stop_hours: float = 72.0
     min_hold_minutes: float = 0.0       # skip trailing/TP exits until this many minutes have elapsed (0 = disabled)
 
+    # Per-asset-class exit overrides
+    stop_loss_pct_long_crypto: float = 2.0
+    stop_loss_pct_short_crypto: float = 2.0
+    trailing_stop_pct_crypto: float = 1.5
+    stop_loss_pct_long_equity: float = 3.0
+    stop_loss_pct_short_equity: float = 3.0
+    trailing_stop_pct_equity: float = 2.5
+    stop_loss_pct_long_commodity: float = 4.0
+    stop_loss_pct_short_commodity: float = 4.0
+    trailing_stop_pct_commodity: float = 3.5
+    trailing_activation_pct: float = 1.0   # trailing stop only arms once position is this % in profit (0 = always active)
+
     # Signal filters
     allowed_signal_types: str = "funding_rate,oi_divergence,volume_anomaly"
     allowed_assets: str = ""
     blocked_assets: str = "FARTCOIN,PENGU"
     block_crypto: bool = False          # block plain symbols (no venue prefix = crypto perp)
+
+    # Risk — per-asset-class position limits (0 = no limit) and circuit breakers
+    max_crypto_positions: int = 2
+    max_equity_positions: int = 2
+    max_commodity_positions: int = 2
+    max_consecutive_losses: int = 6          # pause after N consecutive losses (0 = disabled)
+    loss_cooldown_seconds: int = 900         # extra cooldown per asset class after a loss
+    crypto_long_strength_boost: float = 0.10 # additional min-strength required for crypto longs
 
     # Alerts
     telegram_bot_token: str = ""
@@ -66,6 +91,15 @@ class Config(BaseSettings):
     )
     api_bind: str = "127.0.0.1"
     api_key: str = ""
+
+    def asset_class(self, symbol: str) -> str:
+        """Classify a symbol as crypto, equity, or commodity."""
+        if ":" not in symbol:
+            return "crypto"
+        asset_part = symbol.upper().split(":", 1)[1]
+        if asset_part in _COMMODITY_ASSETS:
+            return "commodity"
+        return "equity"
 
     @property
     def allowed_signal_types_set(self) -> set[str]:

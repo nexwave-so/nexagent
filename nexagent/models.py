@@ -76,6 +76,10 @@ class AgentStatus(BaseModel):
     open_positions: int
     open_long_positions: int = 0
     open_short_positions: int = 0
+    open_crypto_positions: int = 0
+    open_equity_positions: int = 0
+    open_commodity_positions: int = 0
+    consecutive_losses: int = 0
     daily_pnl_usd: float
     daily_loss_limit_usd: float
     paused: bool

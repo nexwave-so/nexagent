@@ -131,8 +131,13 @@ def test_min_hold_expires():
 
 
 def test_directional_stop_loss_long_tighter():
-    # Use signal mode to isolate hard-stop behaviour from trailing stop
-    em = ExitManager(_config(exit_mode="signal", stop_loss_pct_long=2.0, stop_loss_pct_short=5.0))
+    # Use signal mode to isolate hard-stop behaviour from trailing stop.
+    # BTC is crypto so both global and per-class crypto values must be set.
+    em = ExitManager(_config(
+        exit_mode="signal",
+        stop_loss_pct_long=2.0, stop_loss_pct_short=5.0,
+        stop_loss_pct_long_crypto=2.0, stop_loss_pct_short_crypto=5.0,
+    ))
     long_pos = _pos(side="long", current_price=97.9)    # 2.1% drop — past 2% long SL
     short_pos = _pos(side="short", current_price=103.0) # 3% rise — inside 5% short SL
     long_actions = em.check_exits([long_pos])
@@ -142,7 +147,11 @@ def test_directional_stop_loss_long_tighter():
 
 
 def test_directional_stop_loss_short_tighter():
-    em = ExitManager(_config(exit_mode="signal", stop_loss_pct_long=5.0, stop_loss_pct_short=2.0))
+    em = ExitManager(_config(
+        exit_mode="signal",
+        stop_loss_pct_long=5.0, stop_loss_pct_short=2.0,
+        stop_loss_pct_long_crypto=5.0, stop_loss_pct_short_crypto=2.0,
+    ))
     long_pos = _pos(side="long", current_price=96.5)    # 3.5% drop — inside 5% long SL
     short_pos = _pos(side="short", current_price=102.1) # 2.1% rise — past 2% short SL
     long_actions = em.check_exits([long_pos])

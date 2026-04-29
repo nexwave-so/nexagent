@@ -40,6 +40,7 @@ class Agent:
         self._exchange_status: str = "down"
         self._regime_fetched_at: datetime | None = None
         self._running = False
+        self._consecutive_losses: int = 0
 
     async def startup(self) -> None:
         logger.info("Nexagent starting up (paper=%s, exit_mode=%s)", self.config.paper_trading, self.config.exit_mode)
@@ -226,7 +227,37 @@ class Agent:
         pnl = pos.unrealized_pnl or 0.0
         await self.db.add_realized_pnl(pnl)
 
-        self._last_trade_at = utcnow()
+        closed_at = utcnow()
+        hold_minutes = (closed_at - pos.opened_at).total_seconds() / 60
+        signal_type = await self.db.get_signal_type(pos.signal_id) if pos.signal_id else None
+        await self.db.log_trade(
+            symbol=pos.symbol,
+            asset_class=self.config.asset_class(pos.symbol),
+            direction=pos.side,
+            signal_type=signal_type,
+            entry_price=pos.entry_price,
+            exit_price=pos.current_price,
+            size_usd=pos.size_usd,
+            pnl_usd=pnl,
+            hold_minutes=hold_minutes,
+            exit_reason=reason,
+            opened_at=pos.opened_at.isoformat(),
+            closed_at=closed_at.isoformat(),
+        )
+
+        if pnl >= 0:
+            self._consecutive_losses = 0
+        else:
+            self._consecutive_losses += 1
+            self.risk.record_loss(pos.symbol)
+            limit = self.config.max_consecutive_losses
+            if limit > 0 and self._consecutive_losses >= limit:
+                logger.warning(
+                    "Consecutive loss limit hit (%d) — pausing agent", self._consecutive_losses
+                )
+                await self.pause("consecutive_loss_limit")
+
+        self._last_trade_at = closed_at
         self._trades_today += 1
 
         await self.alerts.trade_closed(pos, pnl, reason)
@@ -326,6 +357,9 @@ class Agent:
         uptime = (utcnow() - self._started_at).total_seconds()
         open_longs = sum(1 for p in positions if p.side == "long")
         open_shorts = sum(1 for p in positions if p.side == "short")
+        open_crypto = sum(1 for p in positions if self.config.asset_class(p.symbol) == "crypto")
+        open_equity = sum(1 for p in positions if self.config.asset_class(p.symbol) == "equity")
+        open_commodity = sum(1 for p in positions if self.config.asset_class(p.symbol) == "commodity")
         return AgentStatus(
             running=self._running,
             paper_trading=self.config.paper_trading,
@@ -333,6 +367,10 @@ class Agent:
             open_positions=len(positions),
             open_long_positions=open_longs,
             open_short_positions=open_shorts,
+            open_crypto_positions=open_crypto,
+            open_equity_positions=open_equity,
+            open_commodity_positions=open_commodity,
+            consecutive_losses=self._consecutive_losses,
             daily_pnl_usd=pnl_data.get("realized", 0.0),
             daily_loss_limit_usd=self.config.daily_loss_limit_usd,
             paused=self._paused,

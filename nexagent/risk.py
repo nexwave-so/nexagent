@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from .config import Config
 from .models import AgentStatus, NexwaveSignal, RegimeData
@@ -22,6 +23,7 @@ class RiskManager:
     def __init__(self, config: Config) -> None:
         self.config = config
         self._cooldowns: dict[str, datetime] = {}
+        self._loss_cooldowns: dict[str, datetime] = {}  # asset_class → last loss time
         self._current_regime: str = "ranging"
 
     def update_regime(self, regime: RegimeData) -> None:
@@ -49,11 +51,27 @@ class RiskManager:
             if cap > 0 and state.open_short_positions >= cap:
                 return False, "max_short_positions_reached"
 
+        ac = self.config.asset_class(signal.symbol)
+        if ac == "crypto" and self.config.max_crypto_positions > 0:
+            if state.open_crypto_positions >= self.config.max_crypto_positions:
+                return False, "max_crypto_positions_reached"
+        elif ac == "equity" and self.config.max_equity_positions > 0:
+            if state.open_equity_positions >= self.config.max_equity_positions:
+                return False, "max_equity_positions_reached"
+        elif ac == "commodity" and self.config.max_commodity_positions > 0:
+            if state.open_commodity_positions >= self.config.max_commodity_positions:
+                return False, "max_commodity_positions_reached"
+
         if signal.signal_type not in self.config.allowed_signal_types_set:
             return False, f"signal_type_filtered ({signal.signal_type})"
 
         if signal.strength < self.config.min_signal_strength:
             return False, f"strength_below_threshold ({signal.strength:.2f})"
+
+        if signal.direction == "long" and ":" not in signal.symbol:
+            boosted = self.config.min_signal_strength + self.config.crypto_long_strength_boost
+            if signal.strength < boosted:
+                return False, f"crypto_long_strength_below_boosted ({signal.strength:.2f} < {boosted:.2f})"
 
         if signal.confidence < self.config.min_signal_confidence:
             return False, f"confidence_below_threshold ({signal.confidence:.2f})"
@@ -82,16 +100,25 @@ class RiskManager:
     def record_trade(self, symbol: str) -> None:
         self._cooldowns[symbol.upper()] = utcnow()
 
+    def record_loss(self, symbol: str) -> None:
+        ac = self.config.asset_class(symbol)
+        self._loss_cooldowns[ac] = utcnow()
+
     def _in_cooldown(self, symbol: str) -> bool:
         last = self._cooldowns.get(symbol.upper())
-        if last is None:
-            return False
-        elapsed = (utcnow() - last).total_seconds()
-        return elapsed < self.config.cooldown_seconds
+        if last is not None and (utcnow() - last).total_seconds() < self.config.cooldown_seconds:
+            return True
+        if self.config.loss_cooldown_seconds > 0:
+            ac = self.config.asset_class(symbol)
+            last_loss = self._loss_cooldowns.get(ac)
+            if last_loss is not None and (utcnow() - last_loss).total_seconds() < self.config.loss_cooldown_seconds:
+                return True
+        return False
 
     def position_size_usd(self, portfolio_usd: float, signal: NexwaveSignal) -> float:
         raw = portfolio_usd * (self.config.risk_per_trade_pct / 100)
         capped = min(raw, self.config.max_position_usd)
         multiplier = _REGIME_MULTIPLIERS.get(self._current_regime, 1.0)
-        conviction = signal.strength * signal.confidence
+        # Floor conviction at 0.5 so regime+signal scaling never shrinks size below half
+        conviction = max(signal.strength * signal.confidence, 0.5)
         return capped * multiplier * conviction

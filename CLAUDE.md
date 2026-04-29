@@ -56,15 +56,39 @@ Additional: daily loss check on every exit iteration; regime refresh every 4 hou
 
 `poll_signals()` → dedup via DB (`signal_seen()` in last 1hr, **only `acted_on=1` signals count**) → `RiskManager.check()` (10+ filters) → conflict check (if reverse position exists, close it first) → `RiskManager.position_size_usd()` → min-notional floor check → `Executor.execute_signal()` → persist to SQLite → Telegram alert.
 
+`RiskManager.check()` filters include: paused state, daily loss limit, max open positions, per-asset-class position caps, directional caps, signal type allowlist, min strength/confidence, **crypto long strength boost** (+0.10 over baseline), daily trade cap, asset blocklist/allowlist, cooldown (standard + **loss cooldown per asset class**), and regime gate.
+
 ### Exit Logic (`exits.py`)
 
 In `hybrid` mode, all of these are active per position: hard stop-loss (always runs first), trailing stop (% from high-water-mark), take-profit (% from entry), time stop (max hold hours). `ExitMode.SIGNAL` skips automatic exits entirely — manual close only.
 
+**Asset-class-aware exits**: stop-loss % and trailing stop % are looked up per asset class (crypto/equity/commodity) via `config.asset_class(symbol)`. Defaults: crypto SL 2%/TSL 1.5%, equity SL 3%/TSL 2.5%, commodity SL 4%/TSL 3.5%.
+
+**Trailing stop activation gate**: the trailing stop only arms once the position is `TRAILING_ACTIVATION_PCT` (default 1%) in profit from entry. Below that threshold only the hard stop fires, preventing premature exits on positions that haven't had a chance to move.
+
 ### Position Sizing
 
-`portfolio_value * (risk_pct / 100) * regime_multiplier`, capped at `max_position_usd`. Regime multipliers: `trending_bull=1.0`, `ranging=0.5`, `high_volatility=0.25`, `risk_off=0.0` (blocks all new entries).
+`portfolio_value * (risk_pct / 100) * regime_multiplier * conviction`, capped at `max_position_usd`. Regime multipliers: `trending_bull=1.0`, `ranging=0.5`, `high_volatility=0.25`, `risk_off=0.0` (blocks all new entries). Conviction = `max(strength * confidence, 0.5)` — floored at 50% so micro-sizing is avoided in ranging+weak-signal conditions.
 
 After sizing, `agent.py` enforces a `_MIN_NOTIONAL = $11` floor — signals are skipped with `size_below_min_notional` rather than sent to the exchange where they would be rejected. With a `ranging` multiplier of 0.5, `RISK_PER_TRADE_PCT` must be ≥ ~22% to reliably clear this floor on a $100 portfolio.
+
+### Circuit Breakers
+
+- **Consecutive loss limit**: if `MAX_CONSECUTIVE_LOSSES` (default 6) losses occur in a row, the agent auto-pauses with reason `consecutive_loss_limit`. Resets on any winning trade. Set to 0 to disable.
+- **Loss cooldown**: after a losing trade, all signals for the same asset class (crypto/equity/commodity) are blocked for `LOSS_COOLDOWN_SECONDS` (default 900 = 15 min).
+
+### Asset Classification
+
+`Config.asset_class(symbol)` classifies symbols used throughout exits and risk:
+- No `:` prefix → **crypto** (e.g. `AXS`, `BLUR`)
+- Venue prefix + known commodity → **commodity** (e.g. `xyz:BRENTOIL`, `vntl:NATGAS`)
+- Venue prefix + anything else → **equity** (e.g. `xyz:SAMSUNG`, `xyz:DKNG`)
+
+Known commodities: `BRENTOIL`, `WTIOIL`, `NATGAS`, `GOLD`, `SILVER`, `COPPER`, `WHEAT`, `CORN`, `SOYBEAN`.
+
+### Trade Log
+
+Every closed round-trip is recorded in the `trade_log` SQLite table with: symbol, asset_class, direction, signal_type, entry/exit price, size_usd, pnl_usd, hold_minutes, exit_reason, opened_at, closed_at. Query via `GET /performance`.
 
 ### Paper Trading
 
@@ -79,7 +103,7 @@ Default mode (`PAPER_TRADING=true`). Fills are simulated at mid-price via Hyperl
 | `executor.py` | `Executor` — CCXT wrapper; paper vs. live dispatch |
 | `risk.py` | `RiskManager` — pre-trade filtering and position sizing |
 | `exits.py` | `ExitManager` — stop-loss, trailing stop, TP, time |
-| `db.py` | `Database` — aiosqlite; 4 tables: signals, orders, positions, daily_pnl |
+| `db.py` | `Database` — aiosqlite; 5 tables: signals, orders, positions, daily_pnl, trade_log |
 | `signals.py` | `poll_signals()`, `fetch_regime()` — HTTP client to Nexwave |
 | `x402.py` | `sign_and_pay()` — builds partially-signed Solana tx for x402 pay-per-signal |
 | `alerts.py` | `TelegramAlert` — optional bot notifications |
@@ -89,8 +113,10 @@ Default mode (`PAPER_TRADING=true`). Fills are simulated at mid-price via Hyperl
 
 ### API (port 7070)
 
-`GET /health`, `/status`, `/signals`, `/trades`, `/positions`
+`GET /health`, `/status`, `/signals`, `/trades`, `/positions`, `/performance`
 `POST /pause`, `/resume`, `/close/{symbol}`, `/close-all`
+
+`/performance` returns per-asset-class, per-direction win rates, profit factors, and average hold time from the `trade_log` table.
 
 Optional bearer token auth via `API_KEY` env var. The CLI (`nex status`, `nex close BTC`, etc.) is a thin client over these endpoints.
 
@@ -115,12 +141,37 @@ RISK_PER_TRADE_PCT=1.0
 DAILY_LOSS_LIMIT_USD=200
 MAX_OPEN_POSITIONS=5
 EXIT_MODE=hybrid                 # signal | trailing_stop | time | hybrid
-STOP_LOSS_PCT=3.0
-TRAILING_STOP_PCT=2.0
+STOP_LOSS_PCT_LONG=3.0           # fallback; per-class overrides below take precedence
+STOP_LOSS_PCT_SHORT=3.0
+TRAILING_STOP_PCT=2.0            # fallback
 TAKE_PROFIT_PCT=5.0
 TIME_STOP_HOURS=72
 ALLOWED_ASSETS=                  # empty = all
 BLOCKED_ASSETS=FARTCOIN,PENGU
+
+# Per-asset-class exit overrides
+STOP_LOSS_PCT_LONG_CRYPTO=2.0
+STOP_LOSS_PCT_SHORT_CRYPTO=2.0
+TRAILING_STOP_PCT_CRYPTO=1.5
+STOP_LOSS_PCT_LONG_EQUITY=3.0
+STOP_LOSS_PCT_SHORT_EQUITY=3.0
+TRAILING_STOP_PCT_EQUITY=2.5
+STOP_LOSS_PCT_LONG_COMMODITY=4.0
+STOP_LOSS_PCT_SHORT_COMMODITY=4.0
+TRAILING_STOP_PCT_COMMODITY=3.5
+TRAILING_ACTIVATION_PCT=1.0      # trailing stop only arms once position is this % in profit
+
+# Circuit breakers
+MAX_CONSECUTIVE_LOSSES=6         # pause after N consecutive losses (0 = disabled)
+LOSS_COOLDOWN_SECONDS=900        # extra cooldown per asset class after a loss (15 min)
+
+# Per-asset-class position caps (0 = no limit)
+MAX_CRYPTO_POSITIONS=2
+MAX_EQUITY_POSITIONS=2
+MAX_COMMODITY_POSITIONS=2
+
+# Signal quality
+CRYPTO_LONG_STRENGTH_BOOST=0.10  # extra min-strength required for crypto longs
 ```
 
 ## Deployment

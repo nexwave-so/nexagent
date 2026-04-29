@@ -97,12 +97,19 @@ async def positions_endpoint():
             "entry_price": p.entry_price,
             "current_price": p.current_price,
             "unrealized_pnl": p.unrealized_pnl,
-            "stop_loss": p.stop_loss_price(agent.config.stop_loss_pct),
+            "stop_loss": p.stop_loss_price(
+                agent.config.stop_loss_pct_long if p.side == "long" else agent.config.stop_loss_pct_short
+            ),
             "take_profit": p.take_profit_price(agent.config.take_profit_pct) if agent.config.take_profit_pct > 0 else None,
             "opened_at": p.opened_at.isoformat(),
         }
         for p in positions
     ]
+
+
+@app.get("/performance", dependencies=[Depends(require_auth)])
+async def performance_endpoint():
+    return await get_agent().db.get_performance()
 
 
 @app.post("/pause", dependencies=[Depends(require_auth)])

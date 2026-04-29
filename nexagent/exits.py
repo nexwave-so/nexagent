@@ -67,12 +67,24 @@ class ExitManager:
         elapsed = (utcnow() - pos.opened_at).total_seconds()
         return elapsed < self.config.min_hold_minutes * 60
 
+    def _stop_loss_pct(self, pos: Position) -> float:
+        ac = self.config.asset_class(pos.symbol)
+        if pos.side == "long":
+            return {"crypto": self.config.stop_loss_pct_long_crypto,
+                    "equity": self.config.stop_loss_pct_long_equity,
+                    "commodity": self.config.stop_loss_pct_long_commodity}.get(ac, self.config.stop_loss_pct_long)
+        return {"crypto": self.config.stop_loss_pct_short_crypto,
+                "equity": self.config.stop_loss_pct_short_equity,
+                "commodity": self.config.stop_loss_pct_short_commodity}.get(ac, self.config.stop_loss_pct_short)
+
+    def _trailing_stop_pct(self, pos: Position) -> float:
+        ac = self.config.asset_class(pos.symbol)
+        return {"crypto": self.config.trailing_stop_pct_crypto,
+                "equity": self.config.trailing_stop_pct_equity,
+                "commodity": self.config.trailing_stop_pct_commodity}.get(ac, self.config.trailing_stop_pct)
+
     def _stop_loss_hit(self, pos: Position, current: float) -> bool:
-        sl_pct = (
-            self.config.stop_loss_pct_long
-            if pos.side == "long"
-            else self.config.stop_loss_pct_short
-        )
+        sl_pct = self._stop_loss_pct(pos)
         if sl_pct <= 0:
             return False
         sl = pos.stop_loss_price(sl_pct)
@@ -81,9 +93,22 @@ class ExitManager:
         return current >= sl
 
     def _trailing_stop_hit(self, pos: Position, current: float) -> bool:
-        if self.config.trailing_stop_pct <= 0:
+        tsl_pct = self._trailing_stop_pct(pos)
+        if tsl_pct <= 0:
             return False
-        tsl = pos.trailing_stop_price(self.config.trailing_stop_pct)
+
+        # Only arm the trailing stop once the position is sufficiently in profit.
+        # Hard stop remains active at all times regardless.
+        if self.config.trailing_activation_pct > 0:
+            pnl_pct = (
+                (current - pos.entry_price) / pos.entry_price * 100
+                if pos.side == "long"
+                else (pos.entry_price - current) / pos.entry_price * 100
+            )
+            if pnl_pct < self.config.trailing_activation_pct:
+                return False
+
+        tsl = pos.trailing_stop_price(tsl_pct)
         if tsl is None:
             return False
         if pos.side == "long":

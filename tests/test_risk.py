@@ -172,11 +172,11 @@ def test_position_size_regime_scaling():
 
 
 def test_position_size_conviction_scaling():
-    sig = _signal(strength=0.8, confidence=0.5)  # conviction = 0.40
+    sig = _signal(strength=0.8, confidence=0.5)  # conviction = 0.40, floored at 0.50
     rm = RiskManager(_config(risk_per_trade_pct=1.0, max_position_usd=1000))
     rm.update_regime(RegimeData(state="trending_bull", confidence=0.9))
     size = rm.position_size_usd(10_000, sig)
-    assert size == pytest.approx(40.0)  # 10000 * 1% * 1.0 * 0.40
+    assert size == pytest.approx(50.0)  # 10000 * 1% * 1.0 * max(0.40, 0.50)
 
 
 def test_blocks_max_long_positions():
