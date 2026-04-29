@@ -39,29 +39,32 @@ class Config(BaseSettings):
     max_long_positions: int = 0         # 0 = no per-direction cap
     max_short_positions: int = 0        # 0 = no per-direction cap
     max_daily_trades: int = 20          # 0 = unlimited
-    cooldown_seconds: int = 300
+    cooldown_seconds: int = 120
     min_signal_strength: float = 0.7
     min_signal_confidence: float = 0.6
 
     # Exits
     exit_mode: Literal["signal", "trailing_stop", "time", "hybrid"] = "hybrid"
-    stop_loss_pct_long: float = 3.0     # hard stop for long positions
-    stop_loss_pct_short: float = 3.0    # hard stop for short positions
-    trailing_stop_pct: float = 2.0
-    take_profit_pct: float = 5.0
-    time_stop_hours: float = 72.0
-    min_hold_minutes: float = 0.0       # skip trailing/TP exits until this many minutes have elapsed (0 = disabled)
+    stop_loss_pct_long: float = 1.5     # hard stop for long positions
+    stop_loss_pct_short: float = 1.5    # hard stop for short positions
+    trailing_stop_pct: float = 0.8      # fallback trailing stop (commodity/equity default)
+    take_profit_pct: float = 0.5        # fallback TP (commodity/equity default)
+    time_stop_hours: float = 0.5        # 30-min hard kill: scalp thesis is dead if not paid in 30 min
+    min_hold_minutes: float = 3.0       # skip trailing/TP exits for first 3 min (noise zone)
 
     # Per-asset-class exit overrides
-    stop_loss_pct_long_crypto: float = 2.0
-    stop_loss_pct_short_crypto: float = 2.0
+    stop_loss_pct_long_crypto: float = 1.5
+    stop_loss_pct_short_crypto: float = 1.5
     trailing_stop_pct_crypto: float = 1.5
-    stop_loss_pct_long_equity: float = 3.0
-    stop_loss_pct_short_equity: float = 3.0
-    trailing_stop_pct_equity: float = 2.5
-    stop_loss_pct_long_commodity: float = 4.0
-    stop_loss_pct_short_commodity: float = 4.0
-    trailing_stop_pct_commodity: float = 3.5
+    take_profit_pct_crypto: float = 3.0     # crypto needs bigger move to clear higher fees
+    stop_loss_pct_long_equity: float = 1.5
+    stop_loss_pct_short_equity: float = 1.5
+    trailing_stop_pct_equity: float = 0.8
+    take_profit_pct_equity: float = 0.5
+    stop_loss_pct_long_commodity: float = 1.5
+    stop_loss_pct_short_commodity: float = 1.5
+    trailing_stop_pct_commodity: float = 0.8
+    take_profit_pct_commodity: float = 0.5
     trailing_activation_pct: float = 1.0   # trailing stop only arms once position is this % in profit (0 = always active)
 
     # Signal filters

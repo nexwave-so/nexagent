@@ -62,7 +62,7 @@ Additional: daily loss check on every exit iteration; regime refresh every 4 hou
 
 In `hybrid` mode, all of these are active per position: hard stop-loss (always runs first), trailing stop (% from high-water-mark), take-profit (% from entry), time stop (max hold hours). `ExitMode.SIGNAL` skips automatic exits entirely — manual close only.
 
-**Asset-class-aware exits**: stop-loss % and trailing stop % are looked up per asset class (crypto/equity/commodity) via `config.asset_class(symbol)`. Defaults: crypto SL 2%/TSL 1.5%, equity SL 3%/TSL 2.5%, commodity SL 4%/TSL 3.5%.
+**Asset-class-aware exits**: stop-loss %, trailing stop %, and take-profit % are all looked up per asset class (crypto/equity/commodity) via `config.asset_class(symbol)`. Scalp-tuned defaults: crypto SL 1.5%/TSL 1.5%/TP 3.0%, equity SL 1.5%/TSL 0.8%/TP 0.5%, commodity SL 1.5%/TSL 0.8%/TP 0.5%. Crypto needs a larger TP target because its fees are ~5× higher than commodity/equity perps.
 
 **Trailing stop activation gate**: the trailing stop only arms once the position is `TRAILING_ACTIVATION_PCT` (default 1%) in profit from entry. Below that threshold only the hard stop fires, preventing premature exits on positions that haven't had a chance to move.
 
@@ -141,24 +141,28 @@ RISK_PER_TRADE_PCT=1.0
 DAILY_LOSS_LIMIT_USD=200
 MAX_OPEN_POSITIONS=5
 EXIT_MODE=hybrid                 # signal | trailing_stop | time | hybrid
-STOP_LOSS_PCT_LONG=3.0           # fallback; per-class overrides below take precedence
-STOP_LOSS_PCT_SHORT=3.0
-TRAILING_STOP_PCT=2.0            # fallback
-TAKE_PROFIT_PCT=5.0
-TIME_STOP_HOURS=72
+STOP_LOSS_PCT_LONG=1.5           # fallback; per-class overrides below take precedence
+STOP_LOSS_PCT_SHORT=1.5
+TRAILING_STOP_PCT=0.8            # fallback
+TAKE_PROFIT_PCT=0.5              # fallback
+TIME_STOP_HOURS=0.5              # 30-min hard kill; scalp thesis is dead after 30 min
+MIN_HOLD_MINUTES=3               # skip trailing/TP for first 3 min (noise zone)
 ALLOWED_ASSETS=                  # empty = all
 BLOCKED_ASSETS=FARTCOIN,PENGU
 
 # Per-asset-class exit overrides
-STOP_LOSS_PCT_LONG_CRYPTO=2.0
-STOP_LOSS_PCT_SHORT_CRYPTO=2.0
+STOP_LOSS_PCT_LONG_CRYPTO=1.5
+STOP_LOSS_PCT_SHORT_CRYPTO=1.5
 TRAILING_STOP_PCT_CRYPTO=1.5
-STOP_LOSS_PCT_LONG_EQUITY=3.0
-STOP_LOSS_PCT_SHORT_EQUITY=3.0
-TRAILING_STOP_PCT_EQUITY=2.5
-STOP_LOSS_PCT_LONG_COMMODITY=4.0
-STOP_LOSS_PCT_SHORT_COMMODITY=4.0
-TRAILING_STOP_PCT_COMMODITY=3.5
+TAKE_PROFIT_PCT_CRYPTO=3.0       # crypto fees ~5x higher — needs bigger move to clear them
+STOP_LOSS_PCT_LONG_EQUITY=1.5
+STOP_LOSS_PCT_SHORT_EQUITY=1.5
+TRAILING_STOP_PCT_EQUITY=0.8
+TAKE_PROFIT_PCT_EQUITY=0.5
+STOP_LOSS_PCT_LONG_COMMODITY=1.5
+STOP_LOSS_PCT_SHORT_COMMODITY=1.5
+TRAILING_STOP_PCT_COMMODITY=0.8
+TAKE_PROFIT_PCT_COMMODITY=0.5
 TRAILING_ACTIVATION_PCT=1.0      # trailing stop only arms once position is this % in profit
 
 # Circuit breakers

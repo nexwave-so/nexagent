@@ -54,7 +54,7 @@ class ExitManager:
             case "hybrid":
                 if self._trailing_stop_hit(pos, current):
                     return ExitAction(position=pos, reason="trailing_stop")
-                if self.config.take_profit_pct > 0 and self._take_profit_hit(pos, current):
+                if self._take_profit_hit(pos, current):
                     return ExitAction(position=pos, reason="take_profit")
                 if self.config.time_stop_hours > 0 and self._time_stop_hit(pos):
                     return ExitAction(position=pos, reason="time_stop")
@@ -82,6 +82,12 @@ class ExitManager:
         return {"crypto": self.config.trailing_stop_pct_crypto,
                 "equity": self.config.trailing_stop_pct_equity,
                 "commodity": self.config.trailing_stop_pct_commodity}.get(ac, self.config.trailing_stop_pct)
+
+    def _take_profit_pct(self, pos: Position) -> float:
+        ac = self.config.asset_class(pos.symbol)
+        return {"crypto": self.config.take_profit_pct_crypto,
+                "equity": self.config.take_profit_pct_equity,
+                "commodity": self.config.take_profit_pct_commodity}.get(ac, self.config.take_profit_pct)
 
     def _stop_loss_hit(self, pos: Position, current: float) -> bool:
         sl_pct = self._stop_loss_pct(pos)
@@ -116,7 +122,10 @@ class ExitManager:
         return current >= tsl
 
     def _take_profit_hit(self, pos: Position, current: float) -> bool:
-        tp = pos.take_profit_price(self.config.take_profit_pct)
+        tp_pct = self._take_profit_pct(pos)
+        if tp_pct <= 0:
+            return False
+        tp = pos.take_profit_price(tp_pct)
         if pos.side == "long":
             return current >= tp
         return current <= tp
