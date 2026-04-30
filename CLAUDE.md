@@ -70,7 +70,7 @@ Cold path is opt-in: set `OPENROUTER_API_KEY` to enable. Without it, all analyst
 
 In `hybrid` mode, all of these are active per position: hard stop-loss (always runs first), trailing stop (% from high-water-mark), take-profit (% from entry), time stop (max hold hours). `ExitMode.SIGNAL` skips automatic exits entirely — manual close only.
 
-**Asset-class-aware exits**: stop-loss %, trailing stop %, and take-profit % are all looked up per asset class (crypto/equity/commodity) via `config.asset_class(symbol)`. Scalp-tuned defaults: crypto SL 1.5%/TSL 1.5%/TP 3.0%, equity SL 1.5%/TSL 0.8%/TP 0.5%, commodity SL 1.5%/TSL 0.8%/TP 0.5%. Crypto needs a larger TP target because its fees are ~5× higher than commodity/equity perps.
+**Asset-class-aware exits**: stop-loss %, trailing stop %, and take-profit % are all looked up per asset class (crypto/equity/commodity) via `config.asset_class(symbol)`. Defaults: crypto SL 0.9%/TSL 1.0%/TP 1.2%, equity SL 0.7%/TSL 0.8%/TP 0.5%, commodity SL 1.0%/TSL 0.8%/TP 0.5%. Crypto TP is higher than equity/commodity because its fees are ~5× larger.
 
 **Trailing stop activation gate**: the trailing stop only arms once the position is `TRAILING_ACTIVATION_PCT` (default 1%) in profit from entry. Below that threshold only the hard stop fires, preventing premature exits on positions that haven't had a chance to move.
 
@@ -157,22 +157,25 @@ STOP_LOSS_PCT_LONG=1.5           # fallback; per-class overrides below take prec
 STOP_LOSS_PCT_SHORT=1.5
 TRAILING_STOP_PCT=0.8            # fallback
 TAKE_PROFIT_PCT=0.5              # fallback
-TIME_STOP_HOURS=0.5              # 30-min hard kill; scalp thesis is dead after 30 min
+TIME_STOP_HOURS=1.0              # 1-hour hard kill; raised from 0.5h (avg winning hold exceeds 55 min)
 MIN_HOLD_MINUTES=3               # skip trailing/TP for first 3 min (noise zone)
 ALLOWED_ASSETS=                  # empty = all
 BLOCKED_ASSETS=FARTCOIN,PENGU
 
 # Per-asset-class exit overrides
-STOP_LOSS_PCT_LONG_CRYPTO=1.5
-STOP_LOSS_PCT_SHORT_CRYPTO=1.5
-TRAILING_STOP_PCT_CRYPTO=1.5
-TAKE_PROFIT_PCT_CRYPTO=3.0       # crypto fees ~5x higher — needs bigger move to clear them
-STOP_LOSS_PCT_LONG_EQUITY=1.5
-STOP_LOSS_PCT_SHORT_EQUITY=1.5
+# Crypto: TP lowered 3.0%→1.2% (3% never triggered; actual wins avg ~0.65%); SL tightened to cut losers faster
+STOP_LOSS_PCT_LONG_CRYPTO=0.9
+STOP_LOSS_PCT_SHORT_CRYPTO=0.9
+TRAILING_STOP_PCT_CRYPTO=1.0
+TAKE_PROFIT_PCT_CRYPTO=1.2
+# Equity: SL tightened to match the 0.5% TP target
+STOP_LOSS_PCT_LONG_EQUITY=0.7
+STOP_LOSS_PCT_SHORT_EQUITY=0.7
 TRAILING_STOP_PCT_EQUITY=0.8
 TAKE_PROFIT_PCT_EQUITY=0.5
-STOP_LOSS_PCT_LONG_COMMODITY=1.5
-STOP_LOSS_PCT_SHORT_COMMODITY=1.5
+# Commodity: moderate SL tighten
+STOP_LOSS_PCT_LONG_COMMODITY=1.0
+STOP_LOSS_PCT_SHORT_COMMODITY=1.0
 TRAILING_STOP_PCT_COMMODITY=0.8
 TAKE_PROFIT_PCT_COMMODITY=0.5
 TRAILING_ACTIVATION_PCT=1.0      # trailing stop only arms once position is this % in profit
@@ -181,13 +184,13 @@ TRAILING_ACTIVATION_PCT=1.0      # trailing stop only arms once position is this
 MAX_CONSECUTIVE_LOSSES=6         # pause after N consecutive losses (0 = disabled)
 LOSS_COOLDOWN_SECONDS=900        # extra cooldown per asset class after a loss (15 min)
 
-# Per-asset-class position caps (0 = no limit)
-MAX_CRYPTO_POSITIONS=2
-MAX_EQUITY_POSITIONS=2
-MAX_COMMODITY_POSITIONS=2
+# Per-asset-class position caps — crypto capped at 1; equity/commodity get more room
+MAX_CRYPTO_POSITIONS=1
+MAX_EQUITY_POSITIONS=3
+MAX_COMMODITY_POSITIONS=3
 
 # Signal quality
-CRYPTO_LONG_STRENGTH_BOOST=0.10  # extra min-strength required for crypto longs
+CRYPTO_LONG_STRENGTH_BOOST=0.15  # extra min-strength required for crypto longs (needs ≥ 0.85)
 
 # LLM cold path (optional — OpenRouter)
 OPENROUTER_API_KEY=              # sk-or-v1-... — enables AI-powered trade analysis
