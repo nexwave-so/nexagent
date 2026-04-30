@@ -304,7 +304,7 @@ Provide a daily review with specific parameter recommendations. Respond with JSO
                 prompt,
                 system=_SYSTEM_DAILY,
                 model=self.config.llm_model_reasoning,
-                max_tokens=2000,
+                max_tokens=4000,
                 temperature=0.2,
             )
             if result:
