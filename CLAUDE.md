@@ -210,7 +210,11 @@ LLM_DAILY_REVIEW_ENABLED=true
 
 Nexwave is accessed exclusively via x402 micro-payments. `NEXWAVE_X402_WALLET` + `NEXWAVE_X402_PRIVATE_KEY` are required.
 
-Flow: Nexwave returns HTTP 402 → `signals.py` calls `x402.sign_and_pay()` → builds a partially-signed Solana tx (SPL USDC TransferChecked + Memo + Compute Budget) with the facilitator as feePayer → tx is base64-encoded inside a `PaymentPayload` JSON → sent as `X-Payment` header → facilitator co-signs and broadcasts.
+Flow: Nexwave returns HTTP 402 → `signals.py` calls `x402.sign_and_pay()` → builds a partially-signed Solana tx (SPL USDC TransferChecked + Memo + Compute Budget) with the facilitator as feePayer → tx is base64-encoded inside a `PaymentPayload` JSON → sent as `PAYMENT-SIGNATURE` header → facilitator co-signs and broadcasts.
+
+**Payment header name**: The `@x402/next` library reads `PAYMENT-SIGNATURE` (or `payment-signature`), NOT `X-PAYMENT`. Do not change this header name.
+
+**Facilitator**: Nexwave uses `https://facilitator.payai.network`. This facilitator has a **free tier quota**. When the quota is exhausted, `/settle` returns `403 free_tier_exhausted` and every signal request fails with a bare `402 {}` (no `payment-required` header). This is distinct from a normal payment failure — the agent logs show `x402 payment flow failed` but the underlying cause is invisible without calling `/settle` directly. To restore operation: top up credits at `https://merchant.payai.network`.
 
 Spec: https://github.com/coinbase/x402/blob/main/specs/schemes/exact/scheme_exact_svm.md  
 Overview: https://solana.com/x402

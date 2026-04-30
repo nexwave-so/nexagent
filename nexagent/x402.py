@@ -185,7 +185,7 @@ def _get_ata(owner: Any, mint: Any, token_program: Any) -> Any:
     return ata
 
 
-def _compute_budget_ixs(compute_units: int = 50_000, micro_lamports: int = 1) -> list:
+def _compute_budget_ixs(compute_units: int = 50_000, micro_lamports: int = 100_000) -> list:
     """SetComputeUnitLimit + SetComputeUnitPrice instructions."""
     from solders.instruction import Instruction
     from solders.pubkey import Pubkey
@@ -234,7 +234,7 @@ async def _get_latest_blockhash(rpc_url: str) -> str:
         resp = await client.post(
             rpc_url,
             json={"jsonrpc": "2.0", "id": 1, "method": "getLatestBlockhash",
-                  "params": [{"commitment": "finalized"}]},
+                  "params": [{"commitment": "confirmed"}]},
             timeout=10.0,
         )
         resp.raise_for_status()
