@@ -2,12 +2,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install deps
-COPY pyproject.toml .
-RUN pip install --no-cache-dir -e ".[alerts]"
-
-# Copy source
+# Copy source and metadata together (hatchling needs the package dir to build)
+COPY pyproject.toml README.md ./
 COPY nexagent/ nexagent/
+
+# Install (non-editable — correct for container deployments)
+RUN pip install --no-cache-dir ".[alerts]"
 
 EXPOSE 7070
 

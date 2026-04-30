@@ -126,9 +126,16 @@ class Executor:
                     created_at=now,
                     filled_at=now,
                 )
-            except ccxt.RateLimitExceeded:
+            except ccxt.ExchangeError as e:
+                # Non-retryable: exchange rejected the order for a logical reason
+                # (OI cap, insufficient funds, bad symbol, position limit, etc.).
+                # Retrying won't help — bail immediately.
+                logger.warning("Order rejected by exchange (non-retryable): %s", e)
+                return None
+            except ccxt.NetworkError as e:
+                # Transient: rate limit, timeout, connection drop — retry with backoff.
                 wait = 2 ** attempt
-                logger.warning("Rate limit hit; retrying in %ds (attempt %d/3)", wait, attempt + 1)
+                logger.warning("Network error, retrying in %ds (attempt %d/3): %s", wait, attempt + 1, e)
                 await asyncio.sleep(wait)
             except Exception as e:
                 logger.error("Order failed (attempt %d/3): %s", attempt + 1, e, exc_info=True)
