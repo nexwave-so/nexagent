@@ -112,6 +112,11 @@ async def performance_endpoint():
     return await get_agent().db.get_performance()
 
 
+@app.get("/insights", dependencies=[Depends(require_auth)])
+async def insights_endpoint(insight_type: str | None = None, limit: int = 20):
+    return await get_agent().db.get_recent_insights(insight_type, limit)
+
+
 @app.post("/pause", dependencies=[Depends(require_auth)])
 async def pause_endpoint():
     await get_agent().pause("api_request")

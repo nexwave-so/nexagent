@@ -43,14 +43,22 @@ All tests use `asyncio_mode = "auto"` (pytest-asyncio).
 
 ## Architecture
 
-### Two-Loop Design
+### Two-Loop Design + Cold Path
 
-The agent runs two concurrent async loops:
+The agent runs two concurrent async loops (the **hot path**):
 
 - **Signal loop** (every 30s): Poll Nexwave API → apply risk filters → execute trades
 - **Exit loop** (every 10s): Sync live prices → apply exit rules → close positions
 
 Additional: daily loss check on every exit iteration; regime refresh every 4 hours.
+
+The **cold path** runs asynchronously via `asyncio.create_task` (fire-and-forget) and never blocks trade execution:
+
+- **Post-trade review** (per closed trade): LLM analyzes the completed trade and stores a verdict + recommendation in `llm_insights`
+- **Regime analysis** (every 30 min, configurable): LLM classifies market regime from recent 6hr trade data; alerts on `risk_off`/`high_volatility`
+- **Daily review** (once per day after 01:00 UTC): LLM produces a full strategy review with parameter change suggestions and an overall grade
+
+Cold path is opt-in: set `OPENROUTER_API_KEY` to enable. Without it, all analyst methods return immediately.
 
 ### Signal Pipeline
 
@@ -103,20 +111,24 @@ Default mode (`PAPER_TRADING=true`). Fills are simulated at mid-price via Hyperl
 | `executor.py` | `Executor` — CCXT wrapper; paper vs. live dispatch |
 | `risk.py` | `RiskManager` — pre-trade filtering and position sizing |
 | `exits.py` | `ExitManager` — stop-loss, trailing stop, TP, time |
-| `db.py` | `Database` — aiosqlite; 5 tables: signals, orders, positions, daily_pnl, trade_log |
+| `db.py` | `Database` — aiosqlite; 6 tables: signals, orders, positions, daily_pnl, trade_log, llm_insights |
 | `signals.py` | `poll_signals()`, `fetch_regime()` — HTTP client to Nexwave |
 | `x402.py` | `sign_and_pay()` — builds partially-signed Solana tx for x402 pay-per-signal |
 | `alerts.py` | `TelegramAlert` — optional bot notifications |
+| `llm.py` | `LLMClient` — async OpenRouter client; `complete()` / `complete_json()`; best-effort |
+| `analyst.py` | `Analyst` — cold path brain; post-trade review, regime analysis, daily review |
 | `server.py` | FastAPI app with lifespan startup/shutdown |
 | `cli.py` | Typer CLI; delegates all commands to the FastAPI endpoints |
 | `models.py` | Pydantic data models (NexwaveSignal, Order, Position, etc.) |
 
 ### API (port 7070)
 
-`GET /health`, `/status`, `/signals`, `/trades`, `/positions`, `/performance`
+`GET /health`, `/status`, `/signals`, `/trades`, `/positions`, `/performance`, `/insights`
 `POST /pause`, `/resume`, `/close/{symbol}`, `/close-all`
 
 `/performance` returns per-asset-class, per-direction win rates, profit factors, and average hold time from the `trade_log` table.
+
+`/insights` returns LLM analyst results from the `llm_insights` table. Optional query params: `insight_type` (filter to `trade_review`, `regime_analysis`, or `daily_review`) and `limit` (default 20). CLI: `nex insights --type trade_review -n 5`.
 
 Optional bearer token auth via `API_KEY` env var. The CLI (`nex status`, `nex close BTC`, etc.) is a thin client over these endpoints.
 
@@ -176,6 +188,13 @@ MAX_COMMODITY_POSITIONS=2
 
 # Signal quality
 CRYPTO_LONG_STRENGTH_BOOST=0.10  # extra min-strength required for crypto longs
+
+# LLM cold path (optional — OpenRouter)
+OPENROUTER_API_KEY=              # sk-or-v1-... — enables AI-powered trade analysis
+LLM_MODEL_FAST=deepseek/deepseek-chat-v3-0324   # per-trade review & regime analysis
+LLM_MODEL_REASONING=deepseek/deepseek-r1        # daily strategy review
+LLM_REGIME_INTERVAL_MINUTES=30  # 0 = disabled
+LLM_DAILY_REVIEW_ENABLED=true
 ```
 
 ## Deployment

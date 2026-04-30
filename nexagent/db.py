@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import aiosqlite
+import json
+from datetime import timedelta
 
 from .models import NexwaveSignal, Order, Position
 from .utils import utcnow
@@ -75,6 +77,17 @@ CREATE INDEX IF NOT EXISTS idx_orders_symbol ON orders(symbol);
 CREATE INDEX IF NOT EXISTS idx_orders_type ON orders(order_type);
 CREATE INDEX IF NOT EXISTS idx_trade_log_asset ON trade_log(asset_class);
 CREATE INDEX IF NOT EXISTS idx_trade_log_closed ON trade_log(closed_at);
+
+CREATE TABLE IF NOT EXISTS llm_insights (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    insight_type TEXT NOT NULL,
+    symbol      TEXT,
+    content     TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_insights_type ON llm_insights(insight_type);
+CREATE INDEX IF NOT EXISTS idx_insights_created ON llm_insights(created_at);
 """
 
 
@@ -270,6 +283,38 @@ class Database:
         ) as cur:
             row = await cur.fetchone()
             return row[0] if row else None
+
+    async def save_insight(self, insight_type: str, symbol: str | None, content: dict) -> None:
+        await self.db.execute(
+            """INSERT INTO llm_insights (insight_type, symbol, content, created_at)
+               VALUES (?, ?, ?, ?)""",
+            (insight_type, symbol, json.dumps(content), utcnow().isoformat()),
+        )
+        await self.db.commit()
+
+    async def get_recent_insights(self, insight_type: str | None = None, limit: int = 20) -> list[dict]:
+        if insight_type:
+            query = "SELECT * FROM llm_insights WHERE insight_type=? ORDER BY created_at DESC LIMIT ?"
+            params: tuple = (insight_type, limit)
+        else:
+            query = "SELECT * FROM llm_insights ORDER BY created_at DESC LIMIT ?"
+            params = (limit,)
+        async with self.db.execute(query, params) as cur:
+            rows = [dict(r) for r in await cur.fetchall()]
+        for r in rows:
+            try:
+                r["content"] = json.loads(r["content"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        return rows
+
+    async def get_recent_trade_log(self, hours: int = 24) -> list[dict]:
+        cutoff = (utcnow() - timedelta(hours=hours)).isoformat()
+        async with self.db.execute(
+            "SELECT * FROM trade_log WHERE closed_at > ? ORDER BY closed_at ASC",
+            (cutoff,),
+        ) as cur:
+            return [dict(r) for r in await cur.fetchall()]
 
     async def get_performance(self) -> list[dict]:
         async with self.db.execute(

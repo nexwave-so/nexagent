@@ -7,10 +7,12 @@ from datetime import datetime
 import httpx
 
 from .alerts import TelegramAlert
+from .analyst import Analyst
 from .config import Config
 from .db import Database
 from .executor import Executor
 from .exits import ExitManager
+from .llm import LLMClient
 from .models import AgentStatus, ExitAction, NexwaveSignal, Position, RegimeData
 from .risk import RiskManager
 from .signals import fetch_regime, poll_signals
@@ -27,6 +29,8 @@ class Agent:
         self.risk = RiskManager(config)
         self.exit_manager = ExitManager(config)
         self.alerts = TelegramAlert(config)
+        self.llm = LLMClient(config)
+        self.analyst = Analyst(config, self.db, self.llm, self.alerts)
 
         self._started_at = utcnow()
         self._paused = False
@@ -46,6 +50,7 @@ class Agent:
         logger.info("Nexagent starting up (paper=%s, exit_mode=%s)", self.config.paper_trading, self.config.exit_mode)
         await self.db.connect()
         await self.executor.connect()
+        await self.llm.start()
         self._running = True
         self._exchange_status = "connected"
         await self._sync_exchange_positions()
@@ -68,6 +73,7 @@ class Agent:
             "Shutting down — open positions: %d, signals today: %d, trades today: %d",
             len(positions), self._signals_today, self._trades_today,
         )
+        await self.llm.close()
         await self.executor.close()
         await self.db.close()
 
@@ -92,6 +98,9 @@ class Agent:
             try:
                 await self._check_exits()
                 await self._update_daily_loss_check()
+                # Cold path: periodic regime analysis + daily review
+                asyncio.create_task(self.analyst.maybe_analyze_regime())
+                asyncio.create_task(self.analyst.maybe_daily_review())
             except asyncio.CancelledError:
                 break
             except Exception as e:
@@ -265,6 +274,20 @@ class Agent:
             "Position closed: %s reason=%s pnl=%.2f",
             pos.symbol, reason, pnl,
         )
+
+        # Fire-and-forget: LLM post-trade review (never blocks hot path)
+        asyncio.create_task(self.analyst.review_trade(
+            symbol=pos.symbol,
+            asset_class=self.config.asset_class(pos.symbol),
+            direction=pos.side,
+            entry_price=pos.entry_price,
+            exit_price=pos.current_price or pos.entry_price,
+            size_usd=pos.size_usd,
+            pnl_usd=pnl,
+            hold_minutes=hold_minutes,
+            exit_reason=reason,
+            signal_type=signal_type,
+        ))
 
     # ── Daily loss check ──────────────────────────────────────────────────────
 

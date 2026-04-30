@@ -85,6 +85,13 @@ class Config(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
 
+    # LLM cold path (OpenRouter)
+    openrouter_api_key: str = ""
+    llm_model_fast: str = "deepseek/deepseek-chat-v3-0324"
+    llm_model_reasoning: str = "deepseek/deepseek-r1"
+    llm_regime_interval_minutes: int = 30    # 0 = disabled
+    llm_daily_review_enabled: bool = True
+
     # Agent — api_port reads API_PORT or PORT (Render injects PORT)
     log_level: str = "INFO"
     db_path: str = "./nexagent.db"

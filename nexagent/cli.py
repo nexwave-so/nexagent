@@ -343,6 +343,74 @@ def close_all():
     console.print(f"[green]Closed: {', '.join(data.get('closed', []))}[/]")
 
 
+# ── insights ─────────────────────────────────────────────────────────────────
+
+@app.command()
+def insights(
+    kind: str = typer.Option("all", "--type", "-t", help="Filter: trade_review, regime_analysis, daily_review, or all"),
+    limit: int = typer.Option(10, "--limit", "-n"),
+):
+    """Show recent LLM analyst insights."""
+    try:
+        import httpx
+        config = _get_config()
+        params: dict = {"limit": limit}
+        if kind != "all":
+            params["insight_type"] = kind
+        resp = httpx.get(
+            f"http://{config.api_bind}:{config.api_port}/insights",
+            headers=_auth_headers(config),
+            params=params,
+            timeout=5.0,
+        )
+        rows = resp.json()
+    except Exception as e:
+        console.print(f"[red]Cannot reach agent API: {e}[/]")
+        raise typer.Exit(1)
+
+    if not rows:
+        console.print("[dim]No insights yet. The LLM analyst runs after trades close.[/]")
+        return
+
+    for r in rows:
+        created = r.get("created_at", "")[:19]
+        itype = r.get("insight_type", "?")
+        symbol = r.get("symbol") or "—"
+        content = r.get("content", {})
+
+        type_color = {"trade_review": "cyan", "regime_analysis": "yellow", "daily_review": "green"}.get(itype, "white")
+
+        console.print(f"\n[{type_color}]{'─' * 60}[/]")
+        console.print(f"[dim]{created}[/]  [{type_color}]{itype}[/]  {symbol}")
+
+        if isinstance(content, dict):
+            if itype == "trade_review":
+                verdict = content.get("verdict", "?")
+                v_color = {"good": "green", "bad": "red", "neutral": "yellow"}.get(verdict, "white")
+                console.print(f"  Verdict: [{v_color}]{verdict}[/]")
+                console.print(f"  {content.get('analysis', '')}")
+                rec = content.get("recommendation", "none")
+                if rec != "none":
+                    console.print(f"  [bold]→ {rec}[/]")
+            elif itype == "regime_analysis":
+                console.print(f"  Regime: [bold]{content.get('regime', '?')}[/] ({content.get('confidence', 0):.0%})")
+                console.print(f"  {content.get('reasoning', '')}")
+                for rec in content.get("recommendations", []):
+                    console.print(f"  → {rec}")
+            elif itype == "daily_review":
+                console.print(f"  Grade: [bold]{content.get('overall_grade', '?')}[/]")
+                console.print(f"  {content.get('summary', '')}")
+                for p in content.get("parameter_changes", [])[:5]:
+                    console.print(f"  → `{p.get('param')}`: {p.get('current')} → [bold]{p.get('suggested')}[/] — {p.get('reason')}")
+            else:
+                import json as _json
+                console.print(f"  {_json.dumps(content, indent=2)}")
+        else:
+            console.print(f"  {content}")
+
+    console.print()
+
+
 # ── init ──────────────────────────────────────────────────────────────────────
 
 @app.command()
@@ -365,6 +433,7 @@ def init():
     exit_mode = typer.prompt("Exit mode (signal/trailing_stop/time/hybrid)", default="hybrid")
     tg_token = typer.prompt("Telegram bot token (optional, Enter to skip)", default="")
     tg_chat = typer.prompt("Telegram chat ID (optional, Enter to skip)", default="") if tg_token else ""
+    or_key = typer.prompt("OpenRouter API key for LLM trade analysis (optional, Enter to skip)", default="")
 
     lines = [
         f"HYPERLIQUID_WALLET_ADDRESS={wallet}",
@@ -379,6 +448,8 @@ def init():
         lines.append(f"TELEGRAM_BOT_TOKEN={tg_token}")
     if tg_chat:
         lines.append(f"TELEGRAM_CHAT_ID={tg_chat}")
+    if or_key:
+        lines.append(f"OPENROUTER_API_KEY={or_key}")
 
     env_path.write_text("\n".join(lines) + "\n")
     console.print(f"\n[green]✓ .env written[/]\n")

@@ -72,6 +72,10 @@ class TelegramAlert:
         )
         await self._send(msg)
 
+    async def llm_insight(self, message: str) -> None:
+        """Send an LLM analyst insight via Telegram."""
+        await self._send(f"🤖 {message}")
+
     async def _send(self, text: str) -> None:
         if not self._bot:
             return
